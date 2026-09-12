@@ -39,7 +39,7 @@ D:\VamsiCompanion\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
 Latest automated result:
 - Android Java compile passed with the existing deprecated API note.
 - Browser script syntax check passed.
-- 82 Python tests passed.
+- 83 Python tests passed.
 
 ## Known limits
 - This phase reads notifications only. It does not reply to WhatsApp yet.
@@ -47,3 +47,6 @@ Latest automated result:
 - The app only reads notifications that Android exposes to the notification listener.
 - After enabling Notification Access, you may need to wait for a new notification or restart the Android app for the cache to fill.
 - WhatsApp duplicate/clone behavior depends on package names exposed by Realme/Android. The current filter supports normal WhatsApp and WhatsApp Business packages.
+## Follow-up fix
+- Natural punctuation is now accepted, so `Any notifications bro?` routes to notification reading instead of normal model chat.
+- Android notification bridge now catches unexpected errors and returns valid JSON to the web UI.

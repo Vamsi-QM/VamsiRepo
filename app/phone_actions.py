@@ -74,8 +74,15 @@ _NOTIFICATION_PATTERNS = [
 ]
 
 
-def _parse_notification_action(text: str) -> Optional[PhoneAction]:
+def _normalize_command(text: str) -> str:
     normalized = (text or "").strip().lower()
+    normalized = re.sub(r"[?!.,]+$", "", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _parse_notification_action(text: str) -> Optional[PhoneAction]:
+    normalized = _normalize_command(text)
     if not normalized:
         return None
     if not any(pattern.match(normalized) for pattern in _NOTIFICATION_PATTERNS):
@@ -94,10 +101,11 @@ def _parse_notification_action(text: str) -> Optional[PhoneAction]:
 
 
 def parse_phone_action(text: str) -> Optional[PhoneAction]:
-    notification_action = _parse_notification_action(text)
+    normalized = _normalize_command(text)
+    notification_action = _parse_notification_action(normalized)
     if notification_action is not None:
         return notification_action
-    match = _OPEN_PREFIX.match(text or "")
+    match = _OPEN_PREFIX.match(normalized)
     if not match:
         return None
     requested = re.sub(r"\b(app|application)\b", "", match.group(1).strip(), flags=re.I).strip().lower()

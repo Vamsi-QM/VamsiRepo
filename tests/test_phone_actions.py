@@ -19,6 +19,13 @@ def test_parse_open_phone_action_uses_dialer_intent():
     assert action.action["intent"] == "dialer"
 
 
+def test_parse_open_command_with_question_mark():
+    action = parse_phone_action("Open YouTube?")
+
+    assert action is not None
+    assert action.reply == "Opening YouTube bro."
+
+
 def test_parse_unsupported_app_reports_supported_list():
     action = parse_phone_action("open random banking app")
 
@@ -26,8 +33,9 @@ def test_parse_unsupported_app_reports_supported_list():
     assert action.action == {"type": "unsupported_open_app", "requested": "random banking"}
     assert "I can open only these apps right now" in action.reply
 
+
 def test_parse_whatsapp_notification_action():
-    action = parse_phone_action("read latest WhatsApp message")
+    action = parse_phone_action("Read latest WhatsApp message")
 
     assert action is not None
     assert action.reply == "Checking your WhatsApp notifications bro."
@@ -39,8 +47,8 @@ def test_parse_whatsapp_notification_action():
     }
 
 
-def test_parse_general_notification_action():
-    action = parse_phone_action("any notifications bro")
+def test_parse_general_notification_action_with_question_mark():
+    action = parse_phone_action("Any notifications bro?")
 
     assert action is not None
     assert action.reply == "Checking your notifications bro."

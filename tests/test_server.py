@@ -124,7 +124,7 @@ def test_chat_endpoint_reports_unsupported_phone_app(server):
 
 def test_chat_endpoint_returns_notification_read_action(server):
     srv, provider, _ = server
-    status, data = _post(srv, {"message": "read latest WhatsApp message"})
+    status, data = _post(srv, {"message": "Read latest WhatsApp message"})
 
     assert status == 200
     assert data["ok"] is True

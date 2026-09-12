@@ -521,17 +521,25 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String readNotifications(String actionJson) {
-            if (!notificationAccessEnabled()) {
-                return "{\"ok\":false,\"needs_permission\":true,\"error\":\"Notification access is not enabled.\"}";
+            try {
+                if (!notificationAccessEnabled()) {
+                    return "{\"ok\":false,\"needs_permission\":true,\"error\":\"Notification access is not enabled.\"}";
+                }
+                return VamsiNotificationListenerService.readRecent(actionJson);
+            } catch (Exception error) {
+                return "{\"ok\":false,\"error\":\"Could not read notifications on this phone.\"}";
             }
-            return VamsiNotificationListenerService.readRecent(actionJson);
         }
     }
 
     private void launchIntent(Intent intent, String label) {
         runOnUiThread(() -> {
-            startActivity(intent);
-            Toast.makeText(MainActivity.this, "Opening " + label, Toast.LENGTH_SHORT).show();
+            try {
+                startActivity(intent);
+                Toast.makeText(MainActivity.this, "Opening " + label, Toast.LENGTH_SHORT).show();
+            } catch (Exception error) {
+                Toast.makeText(MainActivity.this, "Could not open " + label, Toast.LENGTH_SHORT).show();
+            }
         });
     }
 
