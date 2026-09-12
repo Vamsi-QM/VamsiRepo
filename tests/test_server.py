@@ -70,6 +70,15 @@ def _json_request(srv, path, method="GET", payload=None, headers=None):
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
+def _raw_request(srv, path, method="POST", data=b"", headers=None):
+    req = urllib.request.Request(_base(srv) + path, data=data, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
 def test_chat_endpoint_ok(server):
     srv, _, _ = server
     status, data = _post(srv, {"message": "hello"})
@@ -202,5 +211,45 @@ def test_phone_mode_requires_pairing_token(tmp_path):
         status, data = _post(srv, {"message": "hello"}, headers=headers)
         assert status == 200
         assert data["reply"] == "Hi phone!"
+    finally:
+        srv.stop()
+
+
+def test_transcribe_requires_pairing_and_reports_missing_model(tmp_path):
+    repo = NotesRepository(tmp_path / "voice.db")
+    registry = ToolRegistry()
+    register_note_tools(registry, repo)
+    provider = MockProvider(available=True, replies=["ok"])
+    orch = ConversationOrchestrator(provider, registry)
+    from app.stt import VoskTranscriber
+
+    srv = AppServer(
+        orch,
+        repo,
+        host="127.0.0.1",
+        port=0,
+        phone_access_enabled=True,
+        pairing_token="secret-token",
+        allow_local_without_token=False,
+        transcriber=VoskTranscriber(tmp_path / "missing-vosk-model"),
+    )
+    srv.start()
+    srv.run_in_thread()
+    try:
+        wav_header_only = b"RIFF" + (b"\0" * 40)
+        status, data = _raw_request(
+            srv, "/api/transcribe", data=wav_header_only, headers={"Content-Type": "audio/wav"}
+        )
+        assert status == 401
+        assert data["ok"] is False
+
+        status, data = _raw_request(
+            srv,
+            "/api/transcribe",
+            data=wav_header_only,
+            headers={"Content-Type": "audio/wav", "X-Vamsi-Pairing-Token": "secret-token"},
+        )
+        assert status == 400
+        assert data["ok"] is False
     finally:
         srv.stop()

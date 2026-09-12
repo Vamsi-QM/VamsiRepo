@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 from app.llm.base import ModelOutputError, ModelTimeout, ModelUnavailable
 from app.orchestrator import ConversationOrchestrator
 from app.storage.notes import NotesRepository
+from app.stt import TranscriptionInputError, TranscriptionUnavailable, VoskTranscriber
 
 log = logging.getLogger("vamsi.server")
 
@@ -48,6 +49,7 @@ class _Handler(BaseHTTPRequestHandler):
     phone_access_enabled: bool
     pairing_token: Optional[str]
     allow_local_without_token: bool
+    transcriber: Optional[VoskTranscriber]
 
     def log_message(self, fmt, *args):  # quiet default logging noise
         log.debug(fmt, *args)
@@ -123,6 +125,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/notes":
             self._handle_create_note()
+            return
+        if parsed.path == "/api/transcribe":
+            self._handle_transcribe()
             return
         self._send_json(404, {"ok": False, "error": "not found"})
 
@@ -269,11 +274,39 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             self._send_json(500, {"ok": False, "error": str(exc)})
 
+    def _handle_transcribe(self) -> None:
+        if not self._require_pairing():
+            return
+        try:
+            content_type = self.headers.get_content_type()
+            if content_type not in {"audio/wav", "audio/wave", "audio/x-wav"}:
+                raise TranscriptionInputError("Voice upload must be WAV audio.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 44 < length <= 5_000_000:
+                raise TranscriptionInputError("Voice audio must be between 44 bytes and 5 MB.")
+            if self.transcriber is None:
+                raise TranscriptionUnavailable("Voice transcription is not configured on the backend.")
+            self.connection.settimeout(30)
+            audio = self.rfile.read(length)
+            text = self.transcriber.transcribe_wav_bytes(audio)
+            self._send_json(200, {"ok": True, "text": text})
+        except TranscriptionInputError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+        except TranscriptionUnavailable as exc:
+            self._send_json(503, {"ok": False, "error": str(exc)})
+        except (ValueError, UnicodeError, OSError) as exc:
+            self.close_connection = True
+            self._send_json(400, {"ok": False, "error": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            log.exception("voice transcription failed")
+            self._send_json(500, {"ok": False, "error": str(exc)})
+
     def _handle_health(self) -> None:
         self._send_json(200, {
             "ok": True,
             "provider": self.orchestrator.provider.name,
             "model_available": self.orchestrator.provider.is_available(),
+            "voice_transcription_available": bool(self.transcriber and self.transcriber.is_available()),
             "phone_access_enabled": self.phone_access_enabled,
             "paired": self._paired(),
         })
@@ -291,6 +324,7 @@ class AppServer:
         phone_access_enabled: bool = False,
         pairing_token: Optional[str] = None,
         allow_local_without_token: bool = True,
+        transcriber: Optional[VoskTranscriber] = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.notes = notes
@@ -300,6 +334,7 @@ class AppServer:
         self.phone_access_enabled = phone_access_enabled
         self.pairing_token = pairing_token
         self.allow_local_without_token = allow_local_without_token
+        self.transcriber = transcriber
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -313,7 +348,8 @@ class AppServer:
             "processed": {}, "sessions": {},
             "phone_access_enabled": phone_access_enabled,
             "pairing_token": pairing_token,
-            "allow_local_without_token": allow_local_without_token})
+            "allow_local_without_token": allow_local_without_token,
+            "transcriber": transcriber})
 
     def start(self) -> None:
         if self._httpd is None:

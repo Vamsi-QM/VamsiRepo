@@ -37,11 +37,13 @@ class Config:
 
         data_dir = Path(env.get("DATA_DIR", r"D:\VamsiCompanion\data"))
         model_path = Path(env.get("MODEL_PATH", r"D:\VamsiCompanion\models\qwen2.5-1.5b-instruct-q4_k_m.gguf"))
+        vosk_model_path = Path(env.get("VOSK_MODEL_PATH", r"D:\VamsiCompanion\models\vosk-model-small-en-us-0.15"))
         db_name = env.get("DB_NAME", "companion.db")
 
         self.data_dir: Path = data_dir
         self.database_path: Path = data_dir / db_name
         self.model_path: Path = model_path
+        self.vosk_model_path: Path = vosk_model_path
         self.pairing_token_path: Path = data_dir / "pairing_token.txt"
 
         self.n_ctx: int = int(env.get("N_CTX", "2048"))

@@ -11,3 +11,6 @@ huggingface-hub>=0.30
 
 # Tests
 pytest>=8.0
+# Offline speech-to-text fallback for phone voice.
+vosk==0.3.45
+

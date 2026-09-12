@@ -57,7 +57,7 @@ Model inference runs in a persistent subprocess. A timed-out inference worker is
 ```
 The E2E test creates unique data under `cache\acceptance`, exercises actual model inference and a unique stored fact across server restart, and verifies that the everyday database is unchanged.
 
-Phase 2 voice uses the browser's built-in speech recognition and speech synthesis. Manual voice testing is required because microphone permission and installed browser voices are controlled by Windows and the browser. Text chat and memory controls continue to work if voice input or output is unavailable.
+Phone app voice uses Android speech recognition when available. If the phone reports speech recognition is unavailable, run `scripts\setup_voice.ps1` once; the app can then record WAV audio and ask the laptop backend to transcribe it with Vosk. Restart the backend after setup. Phase 2 voice uses the browser's built-in speech recognition and speech synthesis. Manual voice testing is required because microphone permission and installed browser voices are controlled by Windows and the browser. Text chat and memory controls continue to work if voice input or output is unavailable.
 
 Phase 3A phone access uses the same browser UI from the Realme phone over home Wi-Fi. API calls require the pairing token printed by `scripts\start_phone.ps1`. Retry protection from earlier phases still applies through request IDs.
 
@@ -102,3 +102,4 @@ Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet re
 
 ## Limits
 This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access works through the Realme browser and now has a first native WebView wrapper source. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. Phone actions, self-development, remote internet access, and internet search are not implemented yet. Use phone access only on a trusted private Wi-Fi network or private ngrok URL.
+

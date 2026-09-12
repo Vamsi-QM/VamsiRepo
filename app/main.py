@@ -13,6 +13,7 @@ from app.orchestrator import ConversationOrchestrator
 from app.storage.notes import NotesRepository
 from app.tools.notes_tools import register_note_tools
 from app.tools.registry import ToolRegistry
+from app.stt import VoskTranscriber
 from app.web.server import AppServer
 
 
@@ -52,6 +53,7 @@ def build_app(config=None):
         max_tool_iterations=config.max_tool_iterations,
         request_timeout=config.request_timeout_seconds,
     )
+    transcriber = VoskTranscriber(config.vosk_model_path)
     server = AppServer(
         orchestrator,
         notes,
@@ -59,6 +61,7 @@ def build_app(config=None):
         port=config.port,
         phone_access_enabled=config.phone_access_enabled,
         pairing_token=config.pairing_token() if config.phone_access_enabled else None,
+        transcriber=transcriber,
     )
     return server, orchestrator, notes, registry, config, provider
 
@@ -82,6 +85,7 @@ def main() -> int:
     print(f"  model:  {config.model_path}")
     print(f"  data:   {config.database_path}")
     print(f"  status: {provider.name} available={provider.is_available()}")
+    print(f"  voice:  {config.vosk_model_path} available={config.vosk_model_path.exists()}")
     if config.phone_access_enabled:
         token = config.pairing_token()
         print("  phone access: enabled")
