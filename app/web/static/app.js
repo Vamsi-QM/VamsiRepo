@@ -22,6 +22,8 @@ let recognition = null;
 let listening = false;
 let memoryOpen = true;
 let pairingToken = localStorage.getItem("vamsi_pairing_token") || "";
+const AndroidVoice = window.VamsiAndroidVoice || null;
+let usingAndroidVoice = false;
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const params = new URLSearchParams(window.location.search);
@@ -235,6 +237,17 @@ async function deleteNote(id) {
 }
 
 function startListening() {
+  if (AndroidVoice && typeof AndroidVoice.startListening === "function") {
+    stopSpeaking();
+    stopListening();
+    usingAndroidVoice = true;
+    listening = true;
+    mic.classList.add("listening");
+    mic.textContent = "Listening...";
+    voiceStatus.textContent = "Listening. Speak now.";
+    AndroidVoice.startListening();
+    return;
+  }
   if (!SpeechRecognition) {
     voiceStatus.textContent = "Speech recognition is not available in this browser. Use Chrome or Edge.";
     return;
@@ -284,13 +297,60 @@ function startListening() {
 }
 
 function stopListening() {
-  if (recognition && listening) {
+  if (usingAndroidVoice && AndroidVoice && typeof AndroidVoice.cancelListening === "function") {
+    AndroidVoice.cancelListening();
+  } else if (recognition && listening) {
     recognition.stop();
   }
+  usingAndroidVoice = false;
   listening = false;
   mic.classList.remove("listening");
   mic.textContent = "Talk";
 }
+
+window.receiveAndroidVoiceEvent = (type, text, error) => {
+  if (type === "start" || type === "speech_start") {
+    usingAndroidVoice = true;
+    listening = true;
+    mic.classList.add("listening");
+    mic.textContent = "Listening...";
+    voiceStatus.textContent = "Listening. Speak now.";
+    return;
+  }
+  if (type === "partial") {
+    transcript.value = text || "";
+    input.value = text || "";
+    voiceStatus.textContent = "Listening. Speak now.";
+    return;
+  }
+  if (type === "result") {
+    transcript.value = text || "";
+    input.value = text || "";
+    usingAndroidVoice = false;
+    listening = false;
+    mic.classList.remove("listening");
+    mic.textContent = "Talk";
+    voiceStatus.textContent = input.value.trim()
+      ? "Transcription ready. Edit if needed, then Send."
+      : "No speech captured.";
+    return;
+  }
+  if (type === "stopped" || type === "speech_end") {
+    usingAndroidVoice = false;
+    listening = false;
+    mic.classList.remove("listening");
+    mic.textContent = "Talk";
+    if (!input.value.trim()) voiceStatus.textContent = "Voice stopped.";
+    return;
+  }
+  if (type === "error") {
+    usingAndroidVoice = false;
+    listening = false;
+    mic.classList.remove("listening");
+    mic.textContent = "Talk";
+    voiceStatus.textContent = "Voice error: " + (error || "Speech recognition failed.") + " Text chat still works.";
+  }
+};
 
 mic.addEventListener("click", () => {
   if (listening) {
@@ -341,9 +401,11 @@ async function init() {
     systemBubble.textContent = h.model_available
       ? "Local companion ready. Try: \"Save a note: my project is called Vamsi Companion.\""
       : "The model file was not found, so responses will report an error. Check MODEL_PATH and .env.";
-    voiceStatus.textContent = SpeechRecognition
-      ? "Voice ready. Click Talk, speak, correct the text, then send."
-      : "Voice input needs Chrome or Edge speech recognition.";
+    voiceStatus.textContent = AndroidVoice
+      ? "Android voice ready. Click Talk, speak, correct the text, then send."
+      : SpeechRecognition
+        ? "Voice ready. Click Talk, speak, correct the text, then send."
+        : "Voice input needs Chrome or Edge speech recognition.";
     await loadMemory();
   } catch (err) {
     status.textContent = "cannot reach backend";
