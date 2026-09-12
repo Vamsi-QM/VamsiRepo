@@ -2,6 +2,7 @@ package com.vamsi.companion;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -34,6 +35,7 @@ public class MainActivity extends Activity {
     private static final String PREFS = "vamsi_companion";
     private static final String KEY_URL = "backend_url";
     private static final int REQ_AUDIO = 44;
+    private static final int REQ_SPEECH = 45;
 
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -252,6 +254,32 @@ public class MainActivity extends Activity {
         speechRecognizer.startListening(intent);
     }
 
+    private boolean canStartSpeechIntentRecognition() {
+        Intent intent = buildSpeechIntent();
+        return intent.resolveActivity(getPackageManager()) != null;
+    }
+
+    private Intent buildSpeechIntent() {
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Vamsi Companion");
+        return intent;
+    }
+
+    private void startSpeechIntentRecognition() {
+        Intent intent = buildSpeechIntent();
+        try {
+            nativeListening = true;
+            emitVoiceEvent("start", "", "");
+            startActivityForResult(intent, REQ_SPEECH);
+        } catch (ActivityNotFoundException error) {
+            nativeListening = false;
+            emitVoiceEvent("error", "", "Android speech recognition is not available on this phone. Install or enable Google voice typing, then try again.");
+        }
+    }
+
     private void stopNativeVoiceRecognition() {
         if (speechRecognizer != null) {
             if (nativeListening) {
@@ -317,7 +345,7 @@ public class MainActivity extends Activity {
     public class VoiceBridge {
         @JavascriptInterface
         public boolean isAvailable() {
-            return SpeechRecognizer.isRecognitionAvailable(MainActivity.this);
+            return SpeechRecognizer.isRecognitionAvailable(MainActivity.this) || canStartSpeechIntentRecognition();
         }
 
         @JavascriptInterface
@@ -343,6 +371,21 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_SPEECH) {
+            nativeListening = false;
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                String text = matches != null && !matches.isEmpty() ? matches.get(0) : "";
+                emitVoiceEvent("result", text, "");
+            } else {
+                emitVoiceEvent("error", "", "No speech was captured. Try again.");
+            }
+        }
+    }
+
+    @Override
     public void onBackPressed() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
@@ -361,3 +404,4 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
+
