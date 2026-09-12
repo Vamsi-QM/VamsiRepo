@@ -42,11 +42,14 @@ def _base(srv):
     return f"http://127.0.0.1:{srv._httpd.server_address[1]}"
 
 
-def _post(srv, payload):
+def _post(srv, payload, headers=None):
     data = json.dumps(payload).encode("utf-8")
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
     req = urllib.request.Request(
         _base(srv) + "/api/chat", data=data,
-        headers={"Content-Type": "application/json"}, method="POST")
+        headers=req_headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -54,10 +57,12 @@ def _post(srv, payload):
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
-def _json_request(srv, path, method="GET", payload=None):
+def _json_request(srv, path, method="GET", payload=None, headers=None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
-    headers = {} if payload is None else {"Content-Type": "application/json"}
-    req = urllib.request.Request(_base(srv) + path, data=data, headers=headers, method=method)
+    req_headers = {} if payload is None else {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(_base(srv) + path, data=data, headers=req_headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -169,3 +174,33 @@ def test_unknown_route_404(server):
             pytest.fail("expected 404")
     except urllib.error.HTTPError as exc:
         assert exc.code == 404
+
+
+def test_phone_mode_requires_pairing_token(tmp_path):
+    repo = NotesRepository(tmp_path / "phone.db")
+    registry = ToolRegistry()
+    register_note_tools(registry, repo)
+    provider = MockProvider(available=True, replies=["Hi phone!"])
+    orch = ConversationOrchestrator(provider, registry)
+    srv = AppServer(
+        orch,
+        repo,
+        host="127.0.0.1",
+        port=0,
+        phone_access_enabled=True,
+        pairing_token="secret-token",
+        allow_local_without_token=False,
+    )
+    srv.start()
+    srv.run_in_thread()
+    try:
+        status, data = _post(srv, {"message": "hello"})
+        assert status == 401
+        assert data["ok"] is False
+
+        headers = {"X-Vamsi-Pairing-Token": "secret-token"}
+        status, data = _post(srv, {"message": "hello"}, headers=headers)
+        assert status == 200
+        assert data["reply"] == "Hi phone!"
+    finally:
+        srv.stop()

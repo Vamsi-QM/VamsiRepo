@@ -1,6 +1,6 @@
-# Vamsi Companion - Phase 2
+# Vamsi Companion - Phase 3A
 
-A local laptop prototype: real Qwen2.5-1.5B text conversation, persistent SQLite notes, a browser voice interface, spoken replies, and memory controls. Python, model, runtime and data live in D:\VamsiCompanion.
+A local laptop prototype: real Qwen2.5-1.5B text conversation, persistent SQLite notes, a browser voice interface, spoken replies, memory controls, and paired phone access on home Wi-Fi. Python, model, runtime and data live in D:\VamsiCompanion.
 
 ## Start
 In PowerShell:
@@ -12,6 +12,22 @@ cd D:\VamsiCompanion
 
 Open http://127.0.0.1:8765. Keep the terminal open; Ctrl+C stops it. If an older server is already running, stop that server first so you use the reviewed code.
 
+## Start For Phone
+In PowerShell:
+
+```powershell
+cd D:\VamsiCompanion
+.\scripts\start_phone.ps1
+```
+
+The terminal prints a phone URL like:
+
+```text
+http://192.168.x.x:8765/?pair=...
+```
+
+Open that exact URL in Chrome on the Realme phone while the phone and laptop are on the same Wi-Fi. The pairing token is saved in the phone browser after the first open. If Windows Firewall asks, allow private-network access for this local Python server.
+
 ## Try
 - `Say hello in one short sentence.` (real local model)
 - `Save a note: my project is called Vamsi Companion.`
@@ -21,6 +37,7 @@ Open http://127.0.0.1:8765. Keep the terminal open; Ctrl+C stops it. If an older
 - Click **Talk**, allow microphone permission in Chrome or Edge, speak a note command, correct the transcription if needed, then click **Send**.
 - Leave **Speak replies** on to hear answers, and click **Stop voice** to interrupt spoken output.
 - Use the **Memory** panel to view, search, edit, and delete saved notes.
+- In phone mode, save a note from the Realme browser, then retrieve it from the laptop browser.
 
 Notes are in `data\companion.db`. New chat resets conversation context, not notes. Conversation messages are bounded in memory and are not permanent memories.
 
@@ -42,6 +59,8 @@ The E2E test creates unique data under `cache\acceptance`, exercises actual mode
 
 Phase 2 voice uses the browser's built-in speech recognition and speech synthesis. Manual voice testing is required because microphone permission and installed browser voices are controlled by Windows and the browser. Text chat and memory controls continue to work if voice input or output is unavailable.
 
+Phase 3A phone access uses the same browser UI from the Realme phone over home Wi-Fi. API calls require the pairing token printed by `scripts\start_phone.ps1`. Retry protection from earlier phases still applies through request IDs.
+
 ## Setup / dependencies
 Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet required for dependencies and model). `requirements.lock` records the installed versions; setup installs the CPU wheel then this lock. Runtime and data remain local; no paid API or automatic cloud fallback. Fresh installation was not rerun during review to avoid an unnecessary model download. All paths are configured through `.env` or environment variables; see `.env.example`.
 
@@ -54,5 +73,14 @@ Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet re
 - Click **New chat**, then ask by voice or text: `What is my project called?`
 - Edit one saved note in the **Memory** panel, refresh/search memory, then delete a test note.
 
+## Phase 3A acceptance checklist
+- Start with `.\scripts\start_phone.ps1`.
+- Open the printed pairing URL on the Realme phone.
+- Confirm the status shows `phone paired`.
+- Send `Save a note: my phone can reach Vamsi Companion.`
+- Open the laptop browser and ask `What is my phone note?`
+- Turn Wi-Fi off on the phone briefly and confirm the browser reports a connection problem instead of duplicating an action.
+- Turn Wi-Fi back on, refresh, and retrieve the saved note again.
+
 ## Limits
-This is still a laptop prototype, not the phone friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. No Android app, phone actions, self-development, authentication for remote access, or internet search yet. Keep it on localhost.
+This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access currently uses the Realme browser, not a native Android APK. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. No Android app package, phone actions, self-development, remote internet access, or internet search yet. Use phone access only on a trusted private Wi-Fi network.

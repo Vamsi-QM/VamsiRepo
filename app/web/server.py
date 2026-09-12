@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +45,9 @@ class _Handler(BaseHTTPRequestHandler):
     processed_lock: threading.Lock
     processed: dict
     cache_processed: bool
+    phone_access_enabled: bool
+    pairing_token: Optional[str]
+    allow_local_without_token: bool
 
     def log_message(self, fmt, *args):  # quiet default logging noise
         log.debug(fmt, *args)
@@ -57,6 +61,27 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _client_is_loopback(self) -> bool:
+        host = self.client_address[0]
+        return host in ("127.0.0.1", "::1", "localhost")
+
+    def _paired(self) -> bool:
+        if not self.phone_access_enabled:
+            return True
+        if self.allow_local_without_token and self._client_is_loopback():
+            return True
+        token = self.headers.get("X-Vamsi-Pairing-Token", "")
+        return bool(self.pairing_token) and secrets.compare_digest(token, self.pairing_token)
+
+    def _require_pairing(self) -> bool:
+        if self._paired():
+            return True
+        self._send_json(401, {
+            "ok": False,
+            "error": "Phone pairing required. Open the pairing URL printed by scripts\\start_phone.ps1.",
+        })
+        return False
 
     def _send_static(self, path: str) -> None:
         rel = path.lstrip("/")
@@ -129,6 +154,8 @@ class _Handler(BaseHTTPRequestHandler):
         return payload
 
     def _handle_chat(self) -> None:
+        if not self._require_pairing():
+            return
         try:
             payload = self._read_json()
             message = payload.get("message")
@@ -174,6 +201,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, response)
 
     def _handle_list_notes(self, query_string: str) -> None:
+        if not self._require_pairing():
+            return
         q = parse_qs(query_string).get("q", [""])[0]
         try:
             notes = self.notes.find(q) if q else self.notes.all(limit=100)
@@ -184,6 +213,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _handle_create_note(self) -> None:
+        if not self._require_pairing():
+            return
         try:
             payload = self._read_json()
             content = payload.get("content")
@@ -202,6 +233,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _handle_update_note(self, note_id: str) -> None:
+        if not self._require_pairing():
+            return
         try:
             if not note_id or len(note_id) > 64:
                 raise ValueError("note id is invalid")
@@ -221,6 +254,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(status, {"ok": False, "error": str(exc)})
 
     def _handle_delete_note(self, note_id: str) -> None:
+        if not self._require_pairing():
+            return
         try:
             if not note_id or len(note_id) > 64:
                 raise ValueError("note id is invalid")
@@ -239,6 +274,8 @@ class _Handler(BaseHTTPRequestHandler):
             "ok": True,
             "provider": self.orchestrator.provider.name,
             "model_available": self.orchestrator.provider.is_available(),
+            "phone_access_enabled": self.phone_access_enabled,
+            "paired": self._paired(),
         })
 
 
@@ -251,21 +288,32 @@ class AppServer:
         host: str = "127.0.0.1",
         port: int = 8765,
         cache_processed: bool = True,
+        phone_access_enabled: bool = False,
+        pairing_token: Optional[str] = None,
+        allow_local_without_token: bool = True,
     ) -> None:
         self.orchestrator = orchestrator
         self.notes = notes
         self.host = host
         self.port = port
         self.cache_processed = cache_processed
+        self.phone_access_enabled = phone_access_enabled
+        self.pairing_token = pairing_token
+        self.allow_local_without_token = allow_local_without_token
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
-        if host not in ("127.0.0.1", "localhost", "::1"):
-            raise ValueError("Phase 1 must bind to localhost")
+        if host not in ("127.0.0.1", "localhost", "::1") and not phone_access_enabled:
+            raise ValueError("Non-localhost binding requires PHONE_ACCESS_ENABLED=1")
+        if phone_access_enabled and not pairing_token:
+            raise ValueError("Phone access requires a pairing token")
         self._handler = type("AppHandler", (_Handler,), {
             "orchestrator": orchestrator, "notes": notes,
             "cache_processed": cache_processed, "processed_lock": threading.Lock(),
-            "processed": {}, "sessions": {}})
+            "processed": {}, "sessions": {},
+            "phone_access_enabled": phone_access_enabled,
+            "pairing_token": pairing_token,
+            "allow_local_without_token": allow_local_without_token})
 
     def start(self) -> None:
         if self._httpd is None:

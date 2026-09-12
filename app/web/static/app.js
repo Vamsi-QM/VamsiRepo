@@ -21,8 +21,19 @@ let pending = null;
 let recognition = null;
 let listening = false;
 let memoryOpen = true;
+let pairingToken = localStorage.getItem("vamsi_pairing_token") || "";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const params = new URLSearchParams(window.location.search);
+const urlPairingToken = params.get("pair");
+if (urlPairingToken) {
+  pairingToken = urlPairingToken;
+  localStorage.setItem("vamsi_pairing_token", pairingToken);
+  params.delete("pair");
+  const cleanQuery = params.toString();
+  const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : "");
+  window.history.replaceState({}, "", cleanUrl);
+}
 
 document.getElementById("toggle-memory").addEventListener("click", () => {
   memoryOpen = !memoryOpen;
@@ -73,6 +84,10 @@ async function readJsonResponse(res) {
   return data;
 }
 
+function apiHeaders(extra = {}) {
+  return pairingToken ? { ...extra, "X-Vamsi-Pairing-Token": pairingToken } : extra;
+}
+
 async function postChat(message) {
   const body = pending && pending.message === message ? pending : {
     message,
@@ -82,7 +97,7 @@ async function postChat(message) {
   pending = body;
   const res = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   const data = await readJsonResponse(res);
@@ -139,7 +154,7 @@ async function loadMemory(query = "") {
   const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
   memoryList.textContent = "Loading...";
   try {
-    const res = await fetch("/api/notes" + suffix);
+    const res = await fetch("/api/notes" + suffix, { headers: apiHeaders() });
     const data = await readJsonResponse(res);
     renderMemory(data.notes || []);
   } catch (err) {
@@ -191,7 +206,7 @@ async function updateNote(id, title, content) {
   try {
     const res = await fetch(`/api/notes/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ title, content }),
     });
     await readJsonResponse(res);
@@ -206,7 +221,10 @@ async function updateNote(id, title, content) {
 async function deleteNote(id) {
   if (!confirm("Delete this saved memory?")) return;
   try {
-    const res = await fetch(`/api/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const res = await fetch(`/api/notes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: apiHeaders(),
+    });
     await readJsonResponse(res);
     status.textContent = "memory deleted";
     await loadMemory(memorySearch.value.trim());
@@ -316,9 +334,10 @@ stopSpeech.addEventListener("click", stopSpeaking);
 
 async function init() {
   try {
-    const res = await fetch("/api/health");
+    const res = await fetch("/api/health", { headers: apiHeaders() });
     const h = await readJsonResponse(res);
-    status.textContent = h.model_available ? "model ready" : "model unavailable";
+    const phoneStatus = h.phone_access_enabled ? (h.paired ? "phone paired" : "pairing needed") : "local";
+    status.textContent = h.model_available ? `model ready - ${phoneStatus}` : `model unavailable - ${phoneStatus}`;
     systemBubble.textContent = h.model_available
       ? "Local companion ready. Try: \"Save a note: my project is called Vamsi Companion.\""
       : "The model file was not found, so responses will report an error. Check MODEL_PATH and .env.";

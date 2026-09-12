@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,9 @@ class Config:
 
         self.host: str = env.get("HOST", "127.0.0.1")
         self.port: int = int(env.get("PORT", "8765"))
+        self.phone_access_enabled: bool = env.get("PHONE_ACCESS_ENABLED", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
 
         data_dir = Path(env.get("DATA_DIR", r"D:\VamsiCompanion\data"))
         model_path = Path(env.get("MODEL_PATH", r"D:\VamsiCompanion\models\qwen2.5-1.5b-instruct-q4_k_m.gguf"))
@@ -38,6 +42,7 @@ class Config:
         self.data_dir: Path = data_dir
         self.database_path: Path = data_dir / db_name
         self.model_path: Path = model_path
+        self.pairing_token_path: Path = data_dir / "pairing_token.txt"
 
         self.n_ctx: int = int(env.get("N_CTX", "2048"))
         self.n_threads: int = int(env.get("N_THREADS", "8"))
@@ -50,6 +55,19 @@ class Config:
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    def pairing_token(self) -> str:
+        env_token = os.environ.get("PAIRING_TOKEN", "").strip()
+        if env_token:
+            return env_token
+        self.ensure_dirs()
+        if self.pairing_token_path.exists():
+            token = self.pairing_token_path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        token = secrets.token_urlsafe(24)
+        self.pairing_token_path.write_text(token, encoding="utf-8")
+        return token
 
     @property
     def model_available(self) -> bool:
