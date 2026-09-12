@@ -25,6 +25,7 @@ let pairingToken = localStorage.getItem("vamsi_pairing_token") || "";
 const AndroidVoice = window.VamsiAndroidVoice || null;
 let usingAndroidVoice = false;
 let recorderState = null;
+let usingAndroidRecorder = false;
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const params = new URLSearchParams(window.location.search);
@@ -238,6 +239,18 @@ async function deleteNote(id) {
 }
 
 function startListening() {
+  if (AndroidVoice && typeof AndroidVoice.canRecordAudio === "function" && AndroidVoice.canRecordAudio()
+      && typeof AndroidVoice.startRecording === "function") {
+    stopSpeaking();
+    stopListening();
+    usingAndroidRecorder = true;
+    listening = true;
+    mic.classList.add("listening");
+    mic.textContent = "Stop recording";
+    voiceStatus.textContent = "Recording. Speak now, then tap Stop recording.";
+    AndroidVoice.startRecording();
+    return;
+  }
   if (AndroidVoice && typeof AndroidVoice.isAvailable === "function" && AndroidVoice.isAvailable()
       && typeof AndroidVoice.startListening === "function") {
     stopSpeaking();
@@ -303,6 +316,10 @@ function startListening() {
 }
 
 function stopListening() {
+  if (usingAndroidRecorder && AndroidVoice && typeof AndroidVoice.stopRecording === "function") {
+    AndroidVoice.stopRecording();
+    return;
+  }
   if (recorderState) {
     stopAudioRecorderFallback();
   } else if (usingAndroidVoice && AndroidVoice && typeof AndroidVoice.cancelListening === "function") {
@@ -311,6 +328,7 @@ function stopListening() {
     recognition.stop();
   }
   usingAndroidVoice = false;
+  usingAndroidRecorder = false;
   listening = false;
   mic.classList.remove("listening");
   mic.textContent = "Talk";
@@ -331,10 +349,35 @@ window.receiveAndroidVoiceEvent = (type, text, error) => {
     voiceStatus.textContent = "Listening. Speak now.";
     return;
   }
+  if (type === "recording_start") {
+    usingAndroidRecorder = true;
+    listening = true;
+    mic.classList.add("listening");
+    mic.textContent = "Stop recording";
+    voiceStatus.textContent = "Recording. Speak now, then tap Stop recording.";
+    return;
+  }
+  if (type === "recording_result") {
+    usingAndroidRecorder = false;
+    listening = false;
+    mic.classList.remove("listening");
+    mic.textContent = "Talk";
+    transcribeBase64Wav(text || "");
+    return;
+  }
+  if (type === "recording_error") {
+    usingAndroidRecorder = false;
+    listening = false;
+    mic.classList.remove("listening");
+    mic.textContent = "Talk";
+    voiceStatus.textContent = "Voice recording failed: " + (error || "Android recording failed.") + " Text chat still works.";
+    return;
+  }
   if (type === "result") {
     transcript.value = text || "";
     input.value = text || "";
     usingAndroidVoice = false;
+    usingAndroidRecorder = false;
     listening = false;
     mic.classList.remove("listening");
     mic.textContent = "Talk";
@@ -345,6 +388,7 @@ window.receiveAndroidVoiceEvent = (type, text, error) => {
   }
   if (type === "stopped" || type === "speech_end") {
     usingAndroidVoice = false;
+    usingAndroidRecorder = false;
     listening = false;
     mic.classList.remove("listening");
     mic.textContent = "Talk";
@@ -353,18 +397,56 @@ window.receiveAndroidVoiceEvent = (type, text, error) => {
   }
   if (type === "error") {
     usingAndroidVoice = false;
+    usingAndroidRecorder = false;
     listening = false;
     mic.classList.remove("listening");
     mic.textContent = "Talk";
     const message = error || "Speech recognition failed.";
     voiceStatus.textContent = "Voice error: " + message + " Text chat still works.";
-    if (message.toLowerCase().includes("not available") && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    if (message.toLowerCase().includes("not available") && AndroidVoice
+        && typeof AndroidVoice.canRecordAudio === "function" && AndroidVoice.canRecordAudio()
+        && typeof AndroidVoice.startRecording === "function") {
+      voiceStatus.textContent = "Android speech is unavailable. Starting phone recorder...";
+      usingAndroidRecorder = true;
+      listening = true;
+      mic.classList.add("listening");
+      mic.textContent = "Stop recording";
+      AndroidVoice.startRecording();
+    } else if (message.toLowerCase().includes("not available") && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       voiceStatus.textContent = "Android speech is unavailable. Starting laptop transcription recorder...";
       startAudioRecorderFallback();
     }
   }
 };
 
+
+async function transcribeBase64Wav(base64) {
+  try {
+    if (!base64) throw new Error("empty recording");
+    voiceStatus.textContent = "Transcribing on laptop...";
+    const wav = base64ToBlob(base64, "audio/wav");
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: apiHeaders({ "Content-Type": "audio/wav" }),
+      body: wav,
+    });
+    const data = await readJsonResponse(res);
+    transcript.value = data.text || "";
+    input.value = data.text || "";
+    voiceStatus.textContent = input.value.trim()
+      ? "Transcription ready. Edit if needed, then Send."
+      : "No speech captured.";
+  } catch (err) {
+    voiceStatus.textContent = "Voice transcription failed: " + err.message + " Text chat still works.";
+  }
+}
+
+function base64ToBlob(base64, type) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
 async function startAudioRecorderFallback() {
   stopSpeaking();
   if (recorderState || busy) return;
@@ -530,13 +612,15 @@ async function init() {
     systemBubble.textContent = h.model_available
       ? "Local companion ready. Try: \"Save a note: my project is called Vamsi Companion.\""
       : "The model file was not found, so responses will report an error. Check MODEL_PATH and .env.";
-    voiceStatus.textContent = AndroidVoice && typeof AndroidVoice.isAvailable === "function" && AndroidVoice.isAvailable()
-      ? "Android voice ready. Click Talk, speak, correct the text, then send."
-      : navigator.mediaDevices && navigator.mediaDevices.getUserMedia
-        ? "Voice recorder ready. Click Talk, speak, click Stop recording, then send."
-        : SpeechRecognition
-          ? "Voice ready. Click Talk, speak, correct the text, then send."
-          : "Voice input needs Chrome or Edge speech recognition.";
+    voiceStatus.textContent = AndroidVoice && typeof AndroidVoice.canRecordAudio === "function" && AndroidVoice.canRecordAudio()
+      ? "Phone recorder ready. Click Talk, speak, click Stop recording, then send."
+      : AndroidVoice && typeof AndroidVoice.isAvailable === "function" && AndroidVoice.isAvailable()
+        ? "Android voice ready. Click Talk, speak, correct the text, then send."
+        : navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+          ? "Voice recorder ready. Click Talk, speak, click Stop recording, then send."
+          : SpeechRecognition
+            ? "Voice ready. Click Talk, speak, correct the text, then send."
+            : "Voice input needs Chrome or Edge speech recognition.";
     await loadMemory();
   } catch (err) {
     status.textContent = "cannot reach backend";

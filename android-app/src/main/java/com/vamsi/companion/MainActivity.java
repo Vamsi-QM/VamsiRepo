@@ -6,16 +6,20 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.util.Base64;
 import android.view.Gravity;
 import android.webkit.JavascriptInterface;
-import android.webkit.WebChromeClient;
 import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -28,6 +32,10 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Locale;
 
@@ -36,6 +44,7 @@ public class MainActivity extends Activity {
     private static final String KEY_URL = "backend_url";
     private static final int REQ_AUDIO = 44;
     private static final int REQ_SPEECH = 45;
+    private static final int SAMPLE_RATE = 16000;
 
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -46,6 +55,11 @@ public class MainActivity extends Activity {
     private SpeechRecognizer speechRecognizer;
     private boolean nativeListening = false;
     private boolean pendingNativeVoiceStart = false;
+    private boolean pendingRecorderStart = false;
+    private volatile boolean recording = false;
+    private AudioRecord audioRecord;
+    private Thread recorderThread;
+    private ByteArrayOutputStream recordedPcm;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,16 +122,10 @@ public class MainActivity extends Activity {
 
     private String normalizeUrl(String rawUrl) {
         String url = rawUrl == null ? "" : rawUrl.trim();
-        if (url.isEmpty()) {
-            return "";
-        }
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "https://" + url;
-        }
+        if (url.isEmpty()) return "";
+        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
         Uri uri = Uri.parse(url);
-        if (uri.getHost() == null) {
-            return "";
-        }
+        if (uri.getHost() == null) return "";
         return url;
     }
 
@@ -143,9 +151,7 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(PermissionRequest request) {
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                    return;
-                }
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
                 for (String resource : request.getResources()) {
                     if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
                         if (hasAudioPermission()) {
@@ -177,33 +183,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void requestAudioPermissionForRecorder() {
+        pendingRecorderStart = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_AUDIO) {
             boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             if (pendingMicRequest != null) {
-                if (granted) {
-                    pendingMicRequest.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                } else {
-                    pendingMicRequest.deny();
-                }
+                if (granted) pendingMicRequest.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                else pendingMicRequest.deny();
                 pendingMicRequest = null;
             }
             if (pendingNativeVoiceStart) {
                 pendingNativeVoiceStart = false;
-                if (granted) {
-                    startNativeVoiceRecognition();
-                } else {
-                    emitVoiceEvent("error", "", "Microphone permission was denied.");
-                }
+                if (granted) startNativeVoiceRecognition();
+                else emitVoiceEvent("error", "", "Microphone permission was denied.");
+            }
+            if (pendingRecorderStart) {
+                pendingRecorderStart = false;
+                if (granted) startNativeRecorder();
+                else emitVoiceEvent("recording_error", "", "Microphone permission was denied.");
             }
         }
     }
 
     private void startNativeVoiceRecognition() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            emitVoiceEvent("error", "", "Android speech recognition is not available on this phone.");
+            startSpeechIntentRecognition();
             return;
         }
         if (!hasAudioPermission()) {
@@ -213,25 +225,12 @@ public class MainActivity extends Activity {
         stopNativeVoiceRecognition();
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
-            @Override public void onReadyForSpeech(Bundle params) {
-                nativeListening = true;
-                emitVoiceEvent("start", "", "");
-            }
-            @Override public void onBeginningOfSpeech() {
-                emitVoiceEvent("speech_start", "", "");
-            }
+            @Override public void onReadyForSpeech(Bundle params) { nativeListening = true; emitVoiceEvent("start", "", ""); }
+            @Override public void onBeginningOfSpeech() { emitVoiceEvent("speech_start", "", ""); }
             @Override public void onRmsChanged(float rmsdB) { }
             @Override public void onBufferReceived(byte[] buffer) { }
-            @Override public void onEndOfSpeech() {
-                nativeListening = false;
-                emitVoiceEvent("speech_end", "", "");
-            }
-            @Override public void onError(int error) {
-                nativeListening = false;
-                String message = speechErrorMessage(error);
-                emitVoiceEvent("error", "", message);
-                destroySpeechRecognizer();
-            }
+            @Override public void onEndOfSpeech() { nativeListening = false; emitVoiceEvent("speech_end", "", ""); }
+            @Override public void onError(int error) { nativeListening = false; emitVoiceEvent("error", "", speechErrorMessage(error)); destroySpeechRecognizer(); }
             @Override public void onResults(Bundle results) {
                 nativeListening = false;
                 ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -276,17 +275,14 @@ public class MainActivity extends Activity {
             startActivityForResult(intent, REQ_SPEECH);
         } catch (ActivityNotFoundException error) {
             nativeListening = false;
-            emitVoiceEvent("error", "", "Android speech recognition is not available on this phone. Install or enable Google voice typing, then try again.");
+            emitVoiceEvent("error", "", "Android speech recognition is not available on this phone.");
         }
     }
 
     private void stopNativeVoiceRecognition() {
         if (speechRecognizer != null) {
-            if (nativeListening) {
-                speechRecognizer.stopListening();
-            } else {
-                destroySpeechRecognizer();
-            }
+            if (nativeListening) speechRecognizer.stopListening();
+            else destroySpeechRecognizer();
         }
         nativeListening = false;
     }
@@ -307,10 +303,138 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void emitVoiceEvent(String type, String text, String error) {
-        if (webView == null) {
+    private void startNativeRecorder() {
+        if (!hasAudioPermission()) {
+            requestAudioPermissionForRecorder();
             return;
         }
+        if (recording) return;
+        int minBuffer = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+        );
+        if (minBuffer <= 0) {
+            emitVoiceEvent("recording_error", "", "Android microphone buffer could not start.");
+            return;
+        }
+        int bufferSize = Math.max(minBuffer, SAMPLE_RATE);
+        try {
+            audioRecord = new AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize
+            );
+            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                releaseAudioRecord();
+                emitVoiceEvent("recording_error", "", "Android microphone could not initialize.");
+                return;
+            }
+            recordedPcm = new ByteArrayOutputStream();
+            recording = true;
+            audioRecord.startRecording();
+            emitVoiceEvent("recording_start", "", "");
+            recorderThread = new Thread(() -> recordLoop(bufferSize), "VamsiVoiceRecorder");
+            recorderThread.start();
+        } catch (SecurityException | IllegalStateException error) {
+            recording = false;
+            releaseAudioRecord();
+            emitVoiceEvent("recording_error", "", "Could not start Android microphone recording.");
+        }
+    }
+
+    private void recordLoop(int bufferSize) {
+        byte[] buffer = new byte[bufferSize];
+        while (recording && audioRecord != null) {
+            int read = audioRecord.read(buffer, 0, buffer.length);
+            if (read > 0 && recordedPcm != null) {
+                recordedPcm.write(buffer, 0, read);
+            }
+        }
+    }
+
+    private void stopNativeRecorder() {
+        if (!recording && audioRecord == null) return;
+        recording = false;
+        try {
+            if (audioRecord != null) audioRecord.stop();
+        } catch (IllegalStateException ignored) { }
+        if (recorderThread != null) {
+            try { recorderThread.join(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            recorderThread = null;
+        }
+        byte[] pcm = recordedPcm == null ? new byte[0] : recordedPcm.toByteArray();
+        recordedPcm = null;
+        releaseAudioRecord();
+        if (pcm.length < SAMPLE_RATE / 2) {
+            emitVoiceEvent("recording_error", "", "Recording was too short. Hold Talk, speak, then stop.");
+            return;
+        }
+        byte[] wav;
+        try {
+            wav = pcmToWav(pcm, SAMPLE_RATE);
+        } catch (IOException error) {
+            emitVoiceEvent("recording_error", "", "Could not prepare recorded audio.");
+            return;
+        }
+        String base64 = Base64.encodeToString(wav, Base64.NO_WRAP);
+        emitVoiceEvent("recording_result", base64, "");
+    }
+
+    private void cancelNativeRecorder() {
+        recording = false;
+        try {
+            if (audioRecord != null) audioRecord.stop();
+        } catch (IllegalStateException ignored) { }
+        releaseAudioRecord();
+        recordedPcm = null;
+        emitVoiceEvent("stopped", "", "");
+    }
+
+    private void releaseAudioRecord() {
+        if (audioRecord != null) {
+            audioRecord.release();
+            audioRecord = null;
+        }
+    }
+
+    private byte[] pcmToWav(byte[] pcm, int sampleRate) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int dataLength = pcm.length;
+        int byteRate = sampleRate * 2;
+        writeAscii(out, "RIFF");
+        writeInt(out, 36 + dataLength);
+        writeAscii(out, "WAVE");
+        writeAscii(out, "fmt ");
+        writeInt(out, 16);
+        writeShort(out, (short) 1);
+        writeShort(out, (short) 1);
+        writeInt(out, sampleRate);
+        writeInt(out, byteRate);
+        writeShort(out, (short) 2);
+        writeShort(out, (short) 16);
+        writeAscii(out, "data");
+        writeInt(out, dataLength);
+        out.write(pcm);
+        return out.toByteArray();
+    }
+
+    private void writeAscii(ByteArrayOutputStream out, String text) throws IOException {
+        out.write(text.getBytes("US-ASCII"));
+    }
+
+    private void writeInt(ByteArrayOutputStream out, int value) throws IOException {
+        out.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array());
+    }
+
+    private void writeShort(ByteArrayOutputStream out, short value) throws IOException {
+        out.write(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(value).array());
+    }
+
+    private void emitVoiceEvent(String type, String text, String error) {
+        if (webView == null) return;
         String script = "window.receiveAndroidVoiceEvent && window.receiveAndroidVoiceEvent("
                 + JSONObject.quote(type) + ","
                 + JSONObject.quote(text == null ? "" : text) + ","
@@ -320,25 +444,16 @@ public class MainActivity extends Activity {
 
     private String speechErrorMessage(int error) {
         switch (error) {
-            case SpeechRecognizer.ERROR_AUDIO:
-                return "Audio recording error.";
-            case SpeechRecognizer.ERROR_CLIENT:
-                return "Speech recognition client error.";
-            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
-                return "Microphone permission is missing.";
+            case SpeechRecognizer.ERROR_AUDIO: return "Audio recording error.";
+            case SpeechRecognizer.ERROR_CLIENT: return "Speech recognition client error.";
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "Microphone permission is missing.";
             case SpeechRecognizer.ERROR_NETWORK:
-            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
-                return "Speech recognition network error.";
-            case SpeechRecognizer.ERROR_NO_MATCH:
-                return "No speech was captured. Try again closer to the phone mic.";
-            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
-                return "Speech recognizer is busy. Try again.";
-            case SpeechRecognizer.ERROR_SERVER:
-                return "Speech recognition server error.";
-            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
-                return "No speech heard. Try again.";
-            default:
-                return "Speech recognition failed.";
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "Speech recognition network error.";
+            case SpeechRecognizer.ERROR_NO_MATCH: return "No speech was captured. Try again closer to the phone mic.";
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "Speech recognizer is busy. Try again.";
+            case SpeechRecognizer.ERROR_SERVER: return "Speech recognition server error.";
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "No speech heard. Try again.";
+            default: return "Speech recognition failed.";
         }
     }
 
@@ -346,6 +461,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean isAvailable() {
             return SpeechRecognizer.isRecognitionAvailable(MainActivity.this) || canStartSpeechIntentRecognition();
+        }
+
+        @JavascriptInterface
+        public boolean canRecordAudio() {
+            return true;
         }
 
         @JavascriptInterface
@@ -360,13 +480,23 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void stopListening() {
-            runOnUiThread(() -> stopNativeVoiceRecognition());
+        public void cancelListening() {
+            runOnUiThread(() -> cancelNativeVoiceRecognition());
         }
 
         @JavascriptInterface
-        public void cancelListening() {
-            runOnUiThread(() -> cancelNativeVoiceRecognition());
+        public void startRecording() {
+            runOnUiThread(() -> startNativeRecorder());
+        }
+
+        @JavascriptInterface
+        public void stopRecording() {
+            runOnUiThread(() -> stopNativeRecorder());
+        }
+
+        @JavascriptInterface
+        public void cancelRecording() {
+            runOnUiThread(() -> cancelNativeRecorder());
         }
     }
 
@@ -396,6 +526,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        cancelNativeRecorder();
         destroySpeechRecognizer();
         if (webView != null) {
             webView.destroy();
@@ -404,4 +535,3 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
-
