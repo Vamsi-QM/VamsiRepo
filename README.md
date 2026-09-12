@@ -61,6 +61,24 @@ Phase 2 voice uses the browser's built-in speech recognition and speech synthesi
 
 Phase 3A phone access uses the same browser UI from the Realme phone over home Wi-Fi. API calls require the pairing token printed by `scripts\start_phone.ps1`. Retry protection from earlier phases still applies through request IDs.
 
+## Native Android Wrapper
+The repo includes a first native Android wrapper in `android-app`. It stores your paired URL, opens Vamsi Companion in a WebView, and asks for microphone permission so the existing Talk button can work inside the app.
+
+Build:
+
+```powershell
+cd D:\VamsiCompanion
+.\scripts\build_android.ps1
+```
+
+APK path after a successful build:
+
+```text
+D:\VamsiCompanion\android-app\build\outputs\apk\debug\android-app-debug.apk
+```
+
+If the script fails with a Java/Gradle loopback error, open `D:\VamsiCompanion` in Android Studio and build the `android-app` module from there.
+
 ## Setup / dependencies
 Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet required for dependencies and model). `requirements.lock` records the installed versions; setup installs the CPU wheel then this lock. Runtime and data remain local; no paid API or automatic cloud fallback. Fresh installation was not rerun during review to avoid an unnecessary model download. All paths are configured through `.env` or environment variables; see `.env.example`.
 
@@ -83,4 +101,4 @@ Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet re
 - Turn Wi-Fi back on, refresh, and retrieve the saved note again.
 
 ## Limits
-This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access currently uses the Realme browser, not a native Android APK. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. No Android app package, phone actions, self-development, remote internet access, or internet search yet. Use phone access only on a trusted private Wi-Fi network.
+This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access works through the Realme browser and now has a first native WebView wrapper source. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. Phone actions, self-development, remote internet access, and internet search are not implemented yet. Use phone access only on a trusted private Wi-Fi network or private ngrok URL.

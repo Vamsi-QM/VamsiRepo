@@ -16,3 +16,8 @@ cache/
 .cache/
 .uv_cache/
 .uv_python/
+
+# Android build outputs
+.gradle/
+android-app/build/
+local.properties
