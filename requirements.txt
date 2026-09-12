@@ -1,0 +1,13 @@
+# Runtime dependencies (Python 3.12 on Windows).
+#
+# llama-cpp-python has no official PyPI wheel for Windows; the CPU wheel
+# is installed from the project's published wheel index:
+#   https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Install via:  scripts\setup.ps1
+llama-cpp-python==0.3.19
+
+# Model download helper (requires internet once, at setup time only).
+huggingface-hub>=0.30
+
+# Tests
+pytest>=8.0

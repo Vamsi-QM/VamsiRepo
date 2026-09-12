@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vamsi Companion</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div>
+        <h1>Vamsi Companion</h1>
+        <p id="phase">Phase 2 voice companion</p>
+      </div>
+      <div class="header-actions">
+        <button id="toggle-memory" type="button">Memory</button>
+        <button id="new-chat" type="button">New chat</button>
+      </div>
+      <span id="status"></span>
+    </header>
+    <div id="workspace">
+      <main id="chat">
+        <div class="bubble system">
+          <pre></pre>
+        </div>
+      </main>
+      <aside id="memory-panel" aria-label="Saved memories">
+        <div class="memory-header">
+          <h2>Memory</h2>
+          <button id="refresh-memory" type="button" title="Refresh memory">Refresh</button>
+        </div>
+        <input maxlength="200" id="memory-search" type="search" placeholder="Search memory">
+        <div id="memory-list"></div>
+      </aside>
+    </div>
+    <section id="voice-panel">
+      <div class="voice-row">
+        <button id="mic" type="button">Talk</button>
+        <button id="stop-speech" type="button" disabled>Stop voice</button>
+        <label><input id="spoken-replies" type="checkbox" checked> Speak replies</label>
+      </div>
+      <textarea maxlength="4000" id="transcript" rows="2" placeholder="Voice text appears here before sending"></textarea>
+      <div id="voice-status"></div>
+    </section>
+    <form id="composer">
+      <input maxlength="4000" id="input" type="text" placeholder="Type a message or use the mic..." autocomplete="off" autofocus>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

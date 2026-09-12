@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Local data / secrets
+.env
+data/*
+!data/.gitkeep
+
+# Models and caches live on D: outside repo
+models/
+cache/
+.cache/
+.uv_cache/
+.uv_python/
