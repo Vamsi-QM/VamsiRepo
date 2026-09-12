@@ -87,6 +87,40 @@ def test_chat_endpoint_ok(server):
     assert data["reply"] == "Hi there!"
 
 
+
+
+def test_chat_endpoint_returns_phone_open_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "open YouTube"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Opening YouTube bro."
+    assert data["actions"] == [{
+        "type": "open_app",
+        "app": "youtube",
+        "label": "YouTube",
+        "packages": ["com.google.android.youtube"],
+        "intent": "launch",
+    }]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
+
+def test_chat_endpoint_reports_unsupported_phone_app(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "open calculator"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert "I can open only these apps right now" in data["reply"]
+    assert "actions" not in data
+    assert data["tool_calls"][0]["arguments"] == {
+        "type": "unsupported_open_app",
+        "requested": "calculator",
+    }
+    assert provider._index == 0
+
 def test_chat_requires_message(server):
     srv, _, _ = server
     status, data = _post(srv, {"message": ""})

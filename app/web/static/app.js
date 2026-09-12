@@ -112,6 +112,22 @@ async function postChat(message) {
   return data;
 }
 
+
+async function runPhoneActions(actions) {
+  if (!Array.isArray(actions) || !actions.length) return;
+  for (const action of actions) {
+    if (!action || action.type !== "open_app") continue;
+    if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.openApp === "function") {
+      const ok = window.VamsiAndroidPhone.openApp(JSON.stringify(action));
+      if (!ok) {
+        addBubble(`I couldn't open ${action.label || action.app}. It may not be installed on this phone.`, "error");
+      }
+    } else {
+      addBubble(`Phone action ready: open ${action.label || action.app}. This works in the Android app.`, "system");
+    }
+  }
+}
+
 async function sendMessage(message) {
   if (!message || busy) return;
   stopSpeaking();
@@ -133,6 +149,7 @@ async function sendMessage(message) {
     }
     status.textContent = (data.seconds ?? 0).toFixed(1) + "s";
     setTimeout(() => (status.textContent = ""), 4000);
+    await runPhoneActions(data.actions || []);
     speak(data.reply || "");
   } catch (err) {
     thinking.classList.remove("thinking");

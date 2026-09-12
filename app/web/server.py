@@ -18,7 +18,8 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from app.llm.base import ModelOutputError, ModelTimeout, ModelUnavailable
-from app.orchestrator import ConversationOrchestrator
+from app.orchestrator import AssistantTurn, ConversationOrchestrator
+from app.phone_actions import parse_phone_action
 from app.storage.notes import NotesRepository
 from app.stt import TranscriptionInputError, TranscriptionUnavailable, VoskTranscriber
 
@@ -198,7 +199,19 @@ class _Handler(BaseHTTPRequestHandler):
                 self.sessions[orch.conversation_id] = orch
                 while len(self.sessions) > 100:
                     self.sessions.pop(next(iter(self.sessions)))
-            response = orch.turn(message.strip()).to_dict()
+            phone_action = parse_phone_action(message.strip())
+            if phone_action is not None:
+                response = AssistantTurn(
+                    phone_action.reply,
+                    conversation_id=orch.conversation_id,
+                    tool_calls=[{"tool": "phone_action", "arguments": phone_action.action}],
+                    seconds=0.0,
+                    ok=True,
+                ).to_dict()
+                if phone_action.action.get("type") == "open_app":
+                    response["actions"] = [phone_action.action]
+            else:
+                response = orch.turn(message.strip()).to_dict()
             if rid and self.cache_processed and response.get("ok"):
                 self.processed[rid] = (fingerprint, response)
                 while len(self.processed) > 1000:

@@ -12,6 +12,7 @@ import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -29,7 +30,9 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -137,6 +140,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setDatabaseEnabled(true);
         webView.addJavascriptInterface(new VoiceBridge(), "VamsiAndroidVoice");
+        webView.addJavascriptInterface(new PhoneBridge(), "VamsiAndroidPhone");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -455,6 +459,60 @@ public class MainActivity extends Activity {
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "No speech heard. Try again.";
             default: return "Speech recognition failed.";
         }
+    }
+
+
+    public class PhoneBridge {
+        @JavascriptInterface
+        public boolean openApp(String actionJson) {
+            try {
+                JSONObject action = new JSONObject(actionJson == null ? "{}" : actionJson);
+                String label = action.optString("label", "app");
+                String intentName = action.optString("intent", "launch");
+                JSONArray packages = action.optJSONArray("packages");
+
+                Intent intent = null;
+                if ("settings".equals(intentName)) {
+                    intent = new Intent(Settings.ACTION_SETTINGS);
+                } else if ("dialer".equals(intentName)) {
+                    intent = new Intent(Intent.ACTION_DIAL);
+                }
+                if (intent != null && intent.resolveActivity(getPackageManager()) != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    launchIntent(intent, label);
+                    return true;
+                }
+
+                if (packages != null) {
+                    for (int i = 0; i < packages.length(); i++) {
+                        String packageName = packages.optString(i, "");
+                        if (packageName.isEmpty()) continue;
+                        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packageName);
+                        if (launchIntent != null) {
+                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            launchIntent(launchIntent, label);
+                            return true;
+                        }
+                    }
+                }
+                showToast(label + " is not installed or cannot be opened");
+                return false;
+            } catch (Exception error) {
+                showToast("Could not open app");
+                return false;
+            }
+        }
+    }
+
+    private void launchIntent(Intent intent, String label) {
+        runOnUiThread(() -> {
+            startActivity(intent);
+            Toast.makeText(MainActivity.this, "Opening " + label, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void showToast(String message) {
+        runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
     }
 
     public class VoiceBridge {
