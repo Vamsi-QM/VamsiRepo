@@ -502,6 +502,30 @@ public class MainActivity extends Activity {
                 return false;
             }
         }
+
+        @JavascriptInterface
+        public boolean notificationAccessEnabled() {
+            String enabled = Settings.Secure.getString(
+                    getContentResolver(),
+                    "enabled_notification_listeners"
+            );
+            return enabled != null && enabled.toLowerCase(Locale.ROOT).contains(getPackageName().toLowerCase(Locale.ROOT));
+        }
+
+        @JavascriptInterface
+        public void openNotificationAccessSettings() {
+            Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            launchIntent(intent, "Notification access settings");
+        }
+
+        @JavascriptInterface
+        public String readNotifications(String actionJson) {
+            if (!notificationAccessEnabled()) {
+                return "{\"ok\":false,\"needs_permission\":true,\"error\":\"Notification access is not enabled.\"}";
+            }
+            return VamsiNotificationListenerService.readRecent(actionJson);
+        }
     }
 
     private void launchIntent(Intent intent, String label) {

@@ -1,4 +1,4 @@
-"""Deterministic phone action parsing for Phase 4A."""
+"""Deterministic phone action parsing for Phase 4 phone features."""
 
 from __future__ import annotations
 
@@ -66,8 +66,37 @@ _OPEN_PREFIX = re.compile(
     re.I,
 )
 
+_NOTIFICATION_PATTERNS = [
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:any|read|show|check|tell\s+me)(?:\s+my)?\s+notifications?\s*(?:bro)?\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:who\s+messaged\s+me|any\s+messages?)\s*(?:bro)?\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:read|show|check|tell\s+me)(?:\s+my)?\s+(?:latest|last|recent)?\s*whatsapp\s+(?:message|notification)s?\s*(?:bro)?\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:any|read|show|check)(?:\s+my)?\s+whatsapp\s+(?:message|notification)s?\s*(?:bro)?\s*$", re.I),
+]
+
+
+def _parse_notification_action(text: str) -> Optional[PhoneAction]:
+    normalized = (text or "").strip().lower()
+    if not normalized:
+        return None
+    if not any(pattern.match(normalized) for pattern in _NOTIFICATION_PATTERNS):
+        return None
+    app = "whatsapp" if "whatsapp" in normalized or "message" in normalized or "messaged" in normalized else ""
+    label = "WhatsApp notifications" if app == "whatsapp" else "notifications"
+    return PhoneAction(
+        reply=f"Checking your {label} bro.",
+        action={
+            "type": "read_notifications",
+            "app": app,
+            "label": label,
+            "limit": 5,
+        },
+    )
+
 
 def parse_phone_action(text: str) -> Optional[PhoneAction]:
+    notification_action = _parse_notification_action(text)
+    if notification_action is not None:
+        return notification_action
     match = _OPEN_PREFIX.match(text or "")
     if not match:
         return None

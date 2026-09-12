@@ -1,6 +1,6 @@
-# Vamsi Companion - Phase 4A
+# Vamsi Companion - Phase 4B
 
-A local laptop-backed companion prototype: real Qwen2.5-1.5B text conversation, persistent SQLite notes, browser voice, spoken replies, memory controls, paired phone access, and first Android phone action support for opening installed apps. Python, model, runtime and data live in D:\VamsiCompanion.
+A local laptop-backed companion prototype: real Qwen2.5-1.5B text conversation, persistent SQLite notes, browser voice, spoken replies, memory controls, paired phone access, Android app opening, and read-only phone notification summaries. Python, model, runtime and data live in D:\VamsiCompanion.
 
 ## Start
 In PowerShell:
@@ -39,6 +39,7 @@ Open that exact URL in Chrome on the Realme phone while the phone and laptop are
 - Use the **Memory** panel to view, search, edit, and delete saved notes.
 - In phone mode, save a note from the Realme browser or Android wrapper, then retrieve it from the laptop browser.
 - In the Android wrapper, try `Open WhatsApp`, `Open YouTube`, `Open Chrome`, `Open Google`, `Open Phone`, `Open Settings`, or `Open Play Store`.
+- After enabling Android Notification Access for Vamsi Companion, try `Any notifications bro?` or `Read latest WhatsApp message`.
 
 Notes are in `data\companion.db`. New chat resets conversation context, not notes. Conversation messages are bounded in memory and are not permanent memories.
 
@@ -58,9 +59,9 @@ Model inference runs in a persistent subprocess. A timed-out inference worker is
 ```
 The E2E test creates unique data under `cache\acceptance`, exercises actual model inference and a unique stored fact across server restart, and verifies that the everyday database is unchanged.
 
-Phone app voice uses a native Android recorder and sends WAV audio to the laptop backend for Vosk transcription. Phase 4A phone actions are handled deterministically before the model: supported open-app commands return a structured action, and the Android wrapper opens the app through a native bridge. It can also try Android speech recognition when available. If phone voice transcription is unavailable, run `scripts\setup_voice.ps1` once. Restart the backend after setup. Phase 2 voice uses the browser's built-in speech recognition and speech synthesis. Manual voice testing is required because microphone permission and installed browser voices are controlled by Windows and the browser. Text chat and memory controls continue to work if voice input or output is unavailable.
+Phone app voice uses a native Android recorder and sends WAV audio to the laptop backend for Vosk transcription. Phase 4 phone actions are handled deterministically before the model: supported open-app commands return a structured action, notification-read commands return a read-only phone action, and the Android wrapper executes those actions through native bridges. It can also try Android speech recognition when available. If phone voice transcription is unavailable, run `scripts\setup_voice.ps1` once. Restart the backend after setup. Phase 2 voice uses the browser's built-in speech recognition and speech synthesis. Manual voice testing is required because microphone permission and installed browser voices are controlled by Windows and the browser. Text chat and memory controls continue to work if voice input or output is unavailable.
 
-Phase 3A phone access uses the same browser UI from the Realme phone over home Wi-Fi. API calls require the pairing token printed by `scripts\start_phone.ps1`. Retry protection from earlier phases still applies through request IDs. Phase 4A app-opening actions are only executed by the Android wrapper after the backend returns a supported `open_app` action.
+Phase 3A phone access uses the same browser UI from the Realme phone over home Wi-Fi. API calls require the pairing token printed by `scripts\start_phone.ps1`. Retry protection from earlier phases still applies through request IDs. Phase 4 app actions are only executed by the Android wrapper after the backend returns a supported phone action. Notification reading requires Android Notification Access to be enabled manually for Vamsi Companion.
 
 ## Native Android Wrapper
 The repo includes a first native Android wrapper in `android-app`. It stores your paired URL, opens Vamsi Companion in a WebView, and asks for microphone permission so the existing Talk button can work inside the app.
@@ -110,7 +111,16 @@ Existing installation is ready. To reproduce: `.\scripts\setup.ps1` (internet re
 - Return to Vamsi Companion and send `Open YouTube`, `Open Settings`, and `Open Play Store`.
 - Try one unsupported app name and confirm the assistant reports the supported list.
 - After text works, repeat one command with **Talk**.
+
+## Phase 4B acceptance checklist
+- Reinstall or rerun the Android app from Android Studio because this phase adds a native notification listener.
+- Start the backend with `.\scripts\start_phone.ps1` and connect through your current paired ngrok URL.
+- Send `Any notifications bro?` from the Android app.
+- If Android settings opens, enable **Vamsi Companion notifications** under Notification Access, then return to the app.
+- Ask someone to send a WhatsApp message or create a visible notification.
+- Send `Read latest WhatsApp message` and confirm the assistant shows and speaks the latest matching notification.
+- Try `Who messaged me?` by Talk or keyboard voice after text works.
 ## Limits
-This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access works through the Realme browser and now has a first native WebView wrapper source. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. Notification reading/replying, call controls, app installation, self-development, remote internet access, and internet search are not implemented yet. Use phone access only on a trusted private Wi-Fi network or private ngrok URL.
+This is still a laptop-backed prototype, not the final Android friend yet. Observed cold model replies were 8-15 seconds; direct note operations around 0.02 seconds. Browser voice quality depends on Chrome/Edge, microphone permission, Windows voices, and internet/browser speech service behavior. Phone access works through the Realme browser and now has a first native WebView wrapper source. Small-model conversation can be inaccurate. Search is keyword-based, not semantic. Saving uses explicit commands; unrestricted conversational memory and perfect model honesty are not guaranteed. Notification replying, call controls, app installation, self-development, remote internet access, and internet search are not implemented yet. Use phone access only on a trusted private Wi-Fi network or private ngrok URL.
 
 

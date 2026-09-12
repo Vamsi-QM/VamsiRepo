@@ -113,19 +113,64 @@ async function postChat(message) {
 }
 
 
+function formatNotificationSummary(data, action) {
+  if (!data || data.ok === false) {
+    if (data && data.needs_permission) {
+      return "Notification access is off. I opened settings bro. Enable Vamsi Companion notifications, then come back and try again.";
+    }
+    return (data && data.error) || "I could not read notifications on this phone.";
+  }
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    return action && action.app === "whatsapp"
+      ? "I did not find any recent WhatsApp notifications bro."
+      : "I did not find any recent notifications bro.";
+  }
+  const lines = items.slice(0, 5).map((item, index) => {
+    const app = item.app || item.package || "Unknown app";
+    const title = item.title || "No title";
+    const text = item.text ? `: ${item.text}` : "";
+    return `${index + 1}. ${app} - ${title}${text}`;
+  });
+  return "Here are your latest notifications bro:\n" + lines.join("\n");
+}
+
 async function runPhoneActions(actions) {
-  if (!Array.isArray(actions) || !actions.length) return;
+  const spoken = [];
+  if (!Array.isArray(actions) || !actions.length) return spoken;
   for (const action of actions) {
-    if (!action || action.type !== "open_app") continue;
-    if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.openApp === "function") {
-      const ok = window.VamsiAndroidPhone.openApp(JSON.stringify(action));
-      if (!ok) {
-        addBubble(`I couldn't open ${action.label || action.app}. It may not be installed on this phone.`, "error");
+    if (!action) continue;
+    if (action.type === "open_app") {
+      if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.openApp === "function") {
+        const ok = window.VamsiAndroidPhone.openApp(JSON.stringify(action));
+        if (!ok) {
+          addBubble(`I couldn't open ${action.label || action.app}. It may not be installed on this phone.`, "error");
+        }
+      } else {
+        addBubble(`Phone action ready: open ${action.label || action.app}. This works in the Android app.`, "system");
       }
-    } else {
-      addBubble(`Phone action ready: open ${action.label || action.app}. This works in the Android app.`, "system");
+    } else if (action.type === "read_notifications") {
+      if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.readNotifications === "function") {
+        let payload = { ok: false, error: "Invalid notification response." };
+        try {
+          payload = JSON.parse(window.VamsiAndroidPhone.readNotifications(JSON.stringify(action)) || "{}");
+        } catch (err) {
+          payload = { ok: false, error: "Could not parse notification response." };
+        }
+        if (payload.needs_permission && typeof window.VamsiAndroidPhone.openNotificationAccessSettings === "function") {
+          window.VamsiAndroidPhone.openNotificationAccessSettings();
+        }
+        const summary = formatNotificationSummary(payload, action);
+        addBubble(summary, payload.ok === false ? "error" : "assistant", "phone: notifications");
+        spoken.push(summary);
+      } else {
+        const message = "Notification reading works only inside the Android app after enabling Notification Access.";
+        addBubble(message, "system");
+        spoken.push(message);
+      }
     }
   }
+  return spoken;
 }
 
 async function sendMessage(message) {
@@ -149,8 +194,8 @@ async function sendMessage(message) {
     }
     status.textContent = (data.seconds ?? 0).toFixed(1) + "s";
     setTimeout(() => (status.textContent = ""), 4000);
-    await runPhoneActions(data.actions || []);
-    speak(data.reply || "");
+    const phoneReplies = await runPhoneActions(data.actions || []);
+    speak(phoneReplies.length ? phoneReplies.join("\n") : (data.reply || ""));
   } catch (err) {
     thinking.classList.remove("thinking");
     thinking.classList.add("error");

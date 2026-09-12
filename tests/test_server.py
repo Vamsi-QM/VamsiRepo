@@ -121,6 +121,23 @@ def test_chat_endpoint_reports_unsupported_phone_app(server):
     }
     assert provider._index == 0
 
+
+def test_chat_endpoint_returns_notification_read_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "read latest WhatsApp message"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Checking your WhatsApp notifications bro."
+    assert data["actions"] == [{
+        "type": "read_notifications",
+        "app": "whatsapp",
+        "label": "WhatsApp notifications",
+        "limit": 5,
+    }]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
 def test_chat_requires_message(server):
     srv, _, _ = server
     status, data = _post(srv, {"message": ""})

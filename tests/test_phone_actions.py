@@ -25,3 +25,28 @@ def test_parse_unsupported_app_reports_supported_list():
     assert action is not None
     assert action.action == {"type": "unsupported_open_app", "requested": "random banking"}
     assert "I can open only these apps right now" in action.reply
+
+def test_parse_whatsapp_notification_action():
+    action = parse_phone_action("read latest WhatsApp message")
+
+    assert action is not None
+    assert action.reply == "Checking your WhatsApp notifications bro."
+    assert action.action == {
+        "type": "read_notifications",
+        "app": "whatsapp",
+        "label": "WhatsApp notifications",
+        "limit": 5,
+    }
+
+
+def test_parse_general_notification_action():
+    action = parse_phone_action("any notifications bro")
+
+    assert action is not None
+    assert action.reply == "Checking your notifications bro."
+    assert action.action == {
+        "type": "read_notifications",
+        "app": "",
+        "label": "notifications",
+        "limit": 5,
+    }

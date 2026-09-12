@@ -208,7 +208,7 @@ class _Handler(BaseHTTPRequestHandler):
                     seconds=0.0,
                     ok=True,
                 ).to_dict()
-                if phone_action.action.get("type") == "open_app":
+                if phone_action.action.get("type") in {"open_app", "read_notifications"}:
                     response["actions"] = [phone_action.action]
             else:
                 response = orch.turn(message.strip()).to_dict()
