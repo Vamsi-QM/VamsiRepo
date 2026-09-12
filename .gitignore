@@ -21,3 +21,6 @@ cache/
 .gradle/
 android-app/build/
 local.properties
+
+.idea/
+build/
