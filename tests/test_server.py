@@ -138,6 +138,74 @@ def test_chat_endpoint_returns_notification_read_action(server):
     assert data["tool_calls"][0]["tool"] == "phone_action"
     assert provider._index == 0
 
+
+
+def test_chat_endpoint_returns_notification_reply_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "Reply to 2: I am driving"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Sending that reply through WhatsApp notification 2 bro."
+    assert data["actions"] == [{
+        "type": "reply_notification",
+        "app": "whatsapp",
+        "label": "WhatsApp",
+        "text": "I am driving",
+        "target_index": 2,
+    }]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
+
+
+def test_chat_endpoint_returns_direct_whatsapp_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "Send WhatsApp to 9876543210: I am driving"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Opening WhatsApp number 9876543210 with your message bro."
+    assert data["actions"] == [{
+        "type": "direct_whatsapp",
+        "label": "WhatsApp",
+        "text": "I am driving",
+        "phone": "919876543210",
+    }]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
+
+
+def test_chat_endpoint_returns_whatsapp_slot_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "Send WhatsApp 2 to Mom: I am driving"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Opening WhatsApp 2 contact Mom with your message bro."
+    assert data["actions"] == [{
+        "type": "direct_whatsapp",
+        "label": "WhatsApp 2",
+        "text": "I am driving",
+        "whatsapp_slot": 2,
+        "target_name": "Mom",
+    }]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
+
+def test_chat_endpoint_returns_list_whatsapp_apps_action(server):
+    srv, provider, _ = server
+    status, data = _post(srv, {"message": "Which WhatsApps are installed?"})
+
+    assert status == 200
+    assert data["ok"] is True
+    assert data["reply"] == "Checking installed WhatsApp apps bro."
+    assert data["actions"] == [{"type": "list_whatsapp_apps"}]
+    assert data["tool_calls"][0]["tool"] == "phone_action"
+    assert provider._index == 0
+
 def test_chat_requires_message(server):
     srv, _, _ = server
     status, data = _post(srv, {"message": ""})

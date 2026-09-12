@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -37,9 +38,12 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -470,6 +474,28 @@ public class MainActivity extends Activity {
                 String label = action.optString("label", "app");
                 String intentName = action.optString("intent", "launch");
                 JSONArray packages = action.optJSONArray("packages");
+                int whatsappSlot = action.optInt("whatsapp_slot", 0);
+
+                if ("whatsapp_slot".equals(intentName) && whatsappSlot > 0) {
+                    String packageName = getWhatsAppPackageForSlot(whatsappSlot);
+                    if (!packageName.isEmpty()) {
+                        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packageName);
+                        if (launchIntent != null) {
+                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            launchIntent(launchIntent, label);
+                            return true;
+                        }
+                    }
+                    if (whatsappSlot == 2) {
+                        Intent chooserIntent = new Intent(Intent.ACTION_SEND);
+                        chooserIntent.setType("text/plain");
+                        chooserIntent.putExtra(Intent.EXTRA_TEXT, "");
+                        launchChooser(chooserIntent, "Choose WhatsApp 2");
+                        return true;
+                    }
+                    showToast(label + " was not found on this phone");
+                    return false;
+                }
 
                 Intent intent = null;
                 if ("settings".equals(intentName)) {
@@ -520,6 +546,18 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public boolean accessibilityEnabled() {
+            return VamsiAccessibilityService.isEnabled(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void openAccessibilitySettings() {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            launchIntent(intent, "Accessibility settings");
+        }
+
+        @JavascriptInterface
         public String readNotifications(String actionJson) {
             try {
                 if (!notificationAccessEnabled()) {
@@ -530,6 +568,163 @@ public class MainActivity extends Activity {
                 return "{\"ok\":false,\"error\":\"Could not read notifications on this phone.\"}";
             }
         }
+
+        @JavascriptInterface
+        public String replyNotification(String actionJson) {
+            try {
+                if (!notificationAccessEnabled()) {
+                    return "{\"ok\":false,\"needs_permission\":true,\"error\":\"Notification access is not enabled.\"}";
+                }
+                return VamsiNotificationListenerService.replyToRecent(actionJson);
+            } catch (Exception error) {
+                return "{\"ok\":false,\"error\":\"Could not reply through notifications on this phone.\"}";
+            }
+        }
+
+        @JavascriptInterface
+        public String openWhatsAppMessage(String actionJson) {
+            try {
+                JSONObject action = new JSONObject(actionJson == null ? "{}" : actionJson);
+                String text = action.optString("text", "").trim();
+                String phone = action.optString("phone", "").replaceAll("\\D+", "");
+                String targetName = action.optString("target_name", "").trim();
+                int whatsappSlot = action.optInt("whatsapp_slot", 0);
+                String selectedPackage = whatsappSlot > 0 ? getWhatsAppPackageForSlot(whatsappSlot) : "";
+                if (whatsappSlot > 0 && selectedPackage.isEmpty() && whatsappSlot != 2) {
+                    return "{\"ok\":false,\"error\":\"That WhatsApp slot was not found on this phone. Ask: Which WhatsApps are installed?\"}";
+                }
+                if (text.isEmpty()) {
+                    return "{\"ok\":false,\"error\":\"WhatsApp message was empty.\"}";
+                }
+                if (!phone.isEmpty()) {
+                    String encoded = URLEncoder.encode(text, "UTF-8").replace("+", "%20");
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/" + phone + "?text=" + encoded));
+                    if (!selectedPackage.isEmpty()) {
+                        intent.setPackage(selectedPackage);
+                    }
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (whatsappSlot == 2 && selectedPackage.isEmpty()) {
+                        launchChooser(intent, "Choose WhatsApp 2");
+                        return "{\"ok\":true,\"mode\":\"chooser_number\",\"slot\":2}";
+                    }
+                    launchIntent(intent, whatsappSlot > 0 ? "WhatsApp " + whatsappSlot : "WhatsApp");
+                    return "{\"ok\":true,\"mode\":\"number\",\"slot\":" + whatsappSlot + "}";
+                }
+
+
+                if (!targetName.isEmpty()) {
+                    if (!VamsiAccessibilityService.isEnabled(MainActivity.this)) {
+                        return "{\"ok\":false,\"needs_accessibility\":true,\"error\":\"Accessibility access is not enabled.\"}";
+                    }
+                    boolean started = VamsiAccessibilityService.startWhatsAppSend(
+                            MainActivity.this,
+                            targetName,
+                            text,
+                            whatsappSlot,
+                            selectedPackage
+                    );
+                    if (!started) {
+                        return "{\"ok\":false,\"error\":\"Could not start WhatsApp accessibility send.\"}";
+                    }
+                    return "{\"ok\":true,\"mode\":\"accessibility_send\",\"slot\":" + whatsappSlot + ",\"target\":" + JSONObject.quote(targetName) + "}";
+                }
+
+                Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                sendIntent.setType("text/plain");
+                sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+                if (!selectedPackage.isEmpty()) {
+                    sendIntent.setPackage(selectedPackage);
+                } else if (whatsappSlot != 2) {
+                    sendIntent.setPackage("com.whatsapp");
+                }
+                sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (sendIntent.resolveActivity(getPackageManager()) == null) {
+                    sendIntent.setPackage(null);
+                }
+                String label = whatsappSlot > 0 ? "WhatsApp " + whatsappSlot : "WhatsApp";
+                if (whatsappSlot == 2 && selectedPackage.isEmpty()) {
+                    launchChooser(sendIntent, "Choose WhatsApp 2");
+                    return "{\"ok\":true,\"mode\":\"chooser_share\",\"slot\":2}";
+                }
+                launchIntent(sendIntent, targetName.isEmpty() ? label : label + " for " + targetName);
+                return "{\"ok\":true,\"mode\":\"share\",\"slot\":" + whatsappSlot + "}";
+            } catch (Exception error) {
+                return "{\"ok\":false,\"error\":\"Could not open WhatsApp with that message.\"}";
+            }
+        }
+
+        @JavascriptInterface
+        public String listWhatsAppApps() {
+            try {
+                JSONArray apps = detectedWhatsAppAppsJson();
+                JSONObject result = new JSONObject();
+                result.put("ok", true);
+                result.put("apps", apps);
+                result.put("count", apps.length());
+                return result.toString();
+            } catch (Exception error) {
+                return "{\"ok\":false,\"error\":\"Could not list WhatsApp apps on this phone.\"}";
+            }
+        }
+    }
+
+    private String getWhatsAppPackageForSlot(int slot) {
+        if (slot < 1) return "";
+        List<WhatsAppCandidate> candidates = detectWhatsAppApps();
+        if (slot > candidates.size()) return "";
+        return candidates.get(slot - 1).packageName;
+    }
+
+    private JSONArray detectedWhatsAppAppsJson() throws Exception {
+        JSONArray apps = new JSONArray();
+        List<WhatsAppCandidate> candidates = detectWhatsAppApps();
+        for (int i = 0; i < candidates.size(); i++) {
+            WhatsAppCandidate candidate = candidates.get(i);
+            JSONObject obj = new JSONObject();
+            obj.put("slot", i + 1);
+            obj.put("label", candidate.label);
+            obj.put("package", candidate.packageName);
+            apps.put(obj);
+        }
+        return apps;
+    }
+
+    private List<WhatsAppCandidate> detectWhatsAppApps() {
+        ArrayList<WhatsAppCandidate> candidates = new ArrayList<>();
+        Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+        launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> activities = getPackageManager().queryIntentActivities(launcherIntent, 0);
+        for (ResolveInfo info : activities) {
+            if (info == null || info.activityInfo == null) continue;
+            String packageName = info.activityInfo.packageName == null ? "" : info.activityInfo.packageName;
+            CharSequence labelValue = info.loadLabel(getPackageManager());
+            String label = labelValue == null ? packageName : labelValue.toString();
+            String haystack = (label + " " + packageName).toLowerCase(Locale.ROOT);
+            if (!haystack.contains("whatsapp")) continue;
+            boolean exists = false;
+            for (WhatsAppCandidate candidate : candidates) {
+                if (candidate.packageName.equals(packageName)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) candidates.add(new WhatsAppCandidate(label, packageName));
+        }
+        candidates.sort(Comparator
+                .comparing((WhatsAppCandidate item) -> !item.packageName.equals("com.whatsapp"))
+                .thenComparing(item -> item.label.toLowerCase(Locale.ROOT))
+                .thenComparing(item -> item.packageName));
+        return candidates;
+    }
+
+    private static class WhatsAppCandidate {
+        final String label;
+        final String packageName;
+
+        WhatsAppCandidate(String label, String packageName) {
+            this.label = label == null ? "" : label;
+            this.packageName = packageName == null ? "" : packageName;
+        }
     }
 
     private void launchIntent(Intent intent, String label) {
@@ -539,6 +734,19 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, "Opening " + label, Toast.LENGTH_SHORT).show();
             } catch (Exception error) {
                 Toast.makeText(MainActivity.this, "Could not open " + label, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void launchChooser(Intent intent, String title) {
+        runOnUiThread(() -> {
+            try {
+                Intent chooser = Intent.createChooser(intent, title);
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(chooser);
+                Toast.makeText(MainActivity.this, title, Toast.LENGTH_SHORT).show();
+            } catch (Exception error) {
+                Toast.makeText(MainActivity.this, "Could not open chooser", Toast.LENGTH_SHORT).show();
             }
         });
     }

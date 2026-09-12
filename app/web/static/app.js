@@ -135,6 +135,59 @@ function formatNotificationSummary(data, action) {
   return "Here are your latest notifications bro:\n" + lines.join("\n");
 }
 
+function formatNotificationReplyResult(data) {
+  if (!data || data.ok === false) {
+    if (data && data.needs_permission) {
+      return "Notification access is off. I opened settings bro. Enable Vamsi Companion notifications, then come back and try again.";
+    }
+    return (data && data.error) || "I could not send that reply through the notification.";
+  }
+  const target = data.title ? ` to ${data.title}` : "";
+  return `Done bro, I sent your reply${target}: ${data.text || ""}`;
+}
+
+function formatDirectWhatsAppResult(data) {
+  if (!data || data.ok === false) {
+    if (data && data.needs_accessibility) {
+      return "Accessibility access is off. I opened settings bro. Enable Vamsi Companion operator, then come back and try again.";
+    }
+    return (data && data.error) || "I could not open WhatsApp with that message.";
+  }
+  const slot = data.slot ? ` ${data.slot}` : "";
+  if (data.mode === "chooser_number") {
+    return "I opened a chooser for WhatsApp 2 bro. Pick your cloned WhatsApp, then check/send the prepared message.";
+  }
+  if (data.mode === "chooser_share") {
+    return "I opened a chooser for WhatsApp 2 bro. Pick your cloned WhatsApp, then choose the contact and send.";
+  }
+  if (data.mode === "number") {
+    return `I opened WhatsApp${slot} for that number bro. Check the chat and send if WhatsApp asks.`;
+  }
+  if (data.mode === "share") {
+    return `I opened WhatsApp${slot} with your message bro. Choose the contact and send.`;
+  }
+  if (data.mode === "accessibility_send") {
+    const target = data.target ? ` to ${data.target}` : "";
+    return `I started WhatsApp${slot} operator bro. It will search, type, and send${target}.`;
+  }
+  return "I opened WhatsApp with your message bro.";
+}
+
+function formatWhatsAppAppsResult(data) {
+  if (!data || data.ok === false) {
+    return (data && data.error) || "I could not list WhatsApp apps on this phone.";
+  }
+  const apps = Array.isArray(data.apps) ? data.apps : [];
+  if (!apps.length) {
+    return "I did not find a directly visible WhatsApp app bro. WhatsApp 2 can still try the chooser fallback.";
+  }
+  const lines = apps.map((app) => `${app.slot}. ${app.label} (${app.package})`);
+  if (apps.length === 1) {
+    lines.push("2. WhatsApp 2 chooser fallback (for hidden clone apps)");
+  }
+  return "Detected WhatsApp apps bro:\n" + lines.join("\n");
+}
+
 async function runPhoneActions(actions) {
   const spoken = [];
   if (!Array.isArray(actions) || !actions.length) return spoken;
@@ -165,6 +218,60 @@ async function runPhoneActions(actions) {
         spoken.push(summary);
       } else {
         const message = "Notification reading works only inside the Android app after enabling Notification Access.";
+        addBubble(message, "system");
+        spoken.push(message);
+      }
+    } else if (action.type === "reply_notification") {
+      if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.replyNotification === "function") {
+        let payload = { ok: false, error: "Invalid reply response." };
+        try {
+          payload = JSON.parse(window.VamsiAndroidPhone.replyNotification(JSON.stringify(action)) || "{}");
+        } catch (err) {
+          payload = { ok: false, error: "Could not parse reply response." };
+        }
+        if (payload.needs_permission && typeof window.VamsiAndroidPhone.openNotificationAccessSettings === "function") {
+          window.VamsiAndroidPhone.openNotificationAccessSettings();
+        }
+        const summary = formatNotificationReplyResult(payload);
+        addBubble(summary, payload.ok === false ? "error" : "assistant", "phone: reply");
+        spoken.push(summary);
+      } else {
+        const message = "Notification replies work only inside the Android app after enabling Notification Access.";
+        addBubble(message, "system");
+        spoken.push(message);
+      }
+    } else if (action.type === "direct_whatsapp") {
+      if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.openWhatsAppMessage === "function") {
+        let payload = { ok: false, error: "Invalid WhatsApp response." };
+        try {
+          payload = JSON.parse(window.VamsiAndroidPhone.openWhatsAppMessage(JSON.stringify(action)) || "{}");
+        } catch (err) {
+          payload = { ok: false, error: "Could not parse WhatsApp response." };
+        }
+        if (payload.needs_accessibility && typeof window.VamsiAndroidPhone.openAccessibilitySettings === "function") {
+          window.VamsiAndroidPhone.openAccessibilitySettings();
+        }
+        const summary = formatDirectWhatsAppResult(payload);
+        addBubble(summary, payload.ok === false ? "error" : "assistant", "phone: whatsapp");
+        spoken.push(summary);
+      } else {
+        const message = "Direct WhatsApp messaging works only inside the Android app.";
+        addBubble(message, "system");
+        spoken.push(message);
+      }
+    } else if (action.type === "list_whatsapp_apps") {
+      if (window.VamsiAndroidPhone && typeof window.VamsiAndroidPhone.listWhatsAppApps === "function") {
+        let payload = { ok: false, error: "Invalid WhatsApp list response." };
+        try {
+          payload = JSON.parse(window.VamsiAndroidPhone.listWhatsAppApps() || "{}");
+        } catch (err) {
+          payload = { ok: false, error: "Could not parse WhatsApp list response." };
+        }
+        const summary = formatWhatsAppAppsResult(payload);
+        addBubble(summary, payload.ok === false ? "error" : "assistant", "phone: whatsapp apps");
+        spoken.push(summary);
+      } else {
+        const message = "WhatsApp app detection works only inside the Android app.";
         addBubble(message, "system");
         spoken.push(message);
       }

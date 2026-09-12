@@ -5,4 +5,5 @@
         <item name="android:statusBarColor">#101418</item>
         <item name="android:navigationBarColor">#101418</item>
     </style>
+    <string name="accessibility_description">Lets Vamsi Companion operate WhatsApp only after your command, such as sending a message to a named contact.</string>
 </resources>

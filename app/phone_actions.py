@@ -66,11 +66,32 @@ _OPEN_PREFIX = re.compile(
     re.I,
 )
 
+_LIST_WHATSAPP_PATTERNS = [
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:which|list|show|check|what)\s+whatsapps?\s+(?:are\s+)?(?:installed|available)(?:\s+on\s+this\s+phone)?\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:list|show)\s+whatsapp\s+(?:apps|accounts)\s*$", re.I),
+]
+
 _NOTIFICATION_PATTERNS = [
     re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:any|read|show|check|tell\s+me)(?:\s+my)?\s+notifications?\s*(?:bro)?\s*$", re.I),
     re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:who\s+messaged\s+me|any\s+messages?)\s*(?:bro)?\s*$", re.I),
     re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:read|show|check|tell\s+me)(?:\s+my)?\s+(?:latest|last|recent)?\s*whatsapp\s+(?:message|notification)s?\s*(?:bro)?\s*$", re.I),
     re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:any|read|show|check)(?:\s+my)?\s+whatsapp\s+(?:message|notification)s?\s*(?:bro)?\s*$", re.I),
+]
+
+_REPLY_PATTERNS = [
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?reply\s+to\s+(?P<target>[^:]+?)\s*:\s*(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?reply\s+to\s+(?P<target>[^:]+?)\s+with\s+(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?reply\s+tell\s+(?:him|her|them)\s+(.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?reply\s+(?:him|her|them)\s+(.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?reply\s+(?:to\s+(?:the\s+)?(?:latest|last|recent)\s+)?(?:whatsapp\s*)?(?:message\s*)?(?:with\s+)?[:\-]?\s*(.+?)\s*$", re.I),
+]
+
+_DIRECT_WHATSAPP_PATTERNS = [
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:send|message|whatsapp)\s+whatsapp\s*(?P<slot>[12])\s+to\s+(?P<target>[^:]+?)\s*:\s*(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:send|message)\s+(?P<target>[^:]+?)\s+on\s+whatsapp\s*(?P<slot>[12])\s*:\s*(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:send|message|whatsapp)\s+(?:a\s+)?(?:whatsapp\s+)?(?:message\s+)?to\s+(?P<target>[^:]+?)\s*:\s*(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:send|message)\s+(?P<target>[^:]+?)\s+on\s+whatsapp\s*:\s*(?P<text>.+?)\s*$", re.I),
+    re.compile(r"^\s*(?:hey\s+bro\s+|bro\s+)?(?:send|message|whatsapp)\s+(?:a\s+)?whatsapp\s+(?:message\s+)?(?:with\s+)?(?P<text>.+?)\s*$", re.I),
 ]
 
 
@@ -79,6 +100,13 @@ def _normalize_command(text: str) -> str:
     normalized = re.sub(r"[?!.,]+$", "", normalized).strip()
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
+
+
+def _clean_command_text(text: str) -> str:
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"[?!]+$", "", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
 
 
 def _parse_notification_action(text: str) -> Optional[PhoneAction]:
@@ -100,8 +128,139 @@ def _parse_notification_action(text: str) -> Optional[PhoneAction]:
     )
 
 
+def _parse_list_whatsapp_action(text: str) -> Optional[PhoneAction]:
+    normalized = _normalize_command(text)
+    if not normalized:
+        return None
+    if not any(pattern.match(normalized) for pattern in _LIST_WHATSAPP_PATTERNS):
+        return None
+    return PhoneAction(
+        reply="Checking installed WhatsApp apps bro.",
+        action={"type": "list_whatsapp_apps"},
+    )
+
+
+def _parse_reply_action(text: str) -> Optional[PhoneAction]:
+    cleaned = _clean_command_text(text)
+    if not cleaned:
+        return None
+    for pattern in _REPLY_PATTERNS:
+        match = pattern.match(cleaned)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_target = groups.get("target", "").strip()
+        reply_text = (groups.get("text") or match.group(match.lastindex or 1)).strip()
+        reply_text = re.sub(r"^(that|saying)\s+", "", reply_text).strip()
+        if not reply_text:
+            return PhoneAction(
+                reply="Tell me the reply message also bro.",
+                action={"type": "unsupported_reply_notification", "reason": "empty_reply"},
+            )
+        action = {
+            "type": "reply_notification",
+            "app": "whatsapp",
+            "label": "WhatsApp",
+            "text": reply_text,
+        }
+        target_label = "the latest WhatsApp notification"
+        if raw_target:
+            normalized_target = _normalize_command(raw_target)
+            ignored_targets = {
+                "latest",
+                "last",
+                "recent",
+                "latest whatsapp",
+                "last whatsapp",
+                "recent whatsapp",
+                "latest whatsapp message",
+                "last whatsapp message",
+                "recent whatsapp message",
+                "whatsapp",
+                "whatsapp message",
+            }
+            if normalized_target not in ignored_targets:
+                if normalized_target.isdigit():
+                    action["target_index"] = int(normalized_target)
+                    target_label = f"WhatsApp notification {normalized_target}"
+                else:
+                    target_name = re.sub(r"\b(whatsapp|message|notification)\b", "", raw_target, flags=re.I).strip()
+                    target_name = target_name.strip(" \"'“”‘’")
+                    target_name = re.sub(r"\s+", " ", target_name)
+                    if target_name:
+                        action["target_name"] = target_name
+                        target_label = f"WhatsApp notification from {target_name}"
+        return PhoneAction(
+            reply=f"Sending that reply through {target_label} bro.",
+            action=action,
+        )
+    return None
+
+
+def _phone_digits(value: str) -> str:
+    digits = re.sub(r"\D+", "", value or "")
+    if len(digits) == 10:
+        return "91" + digits
+    if 8 <= len(digits) <= 15:
+        return digits
+    return ""
+
+
+def _parse_direct_whatsapp_action(text: str) -> Optional[PhoneAction]:
+    cleaned = _clean_command_text(text)
+    if not cleaned:
+        return None
+    for pattern in _DIRECT_WHATSAPP_PATTERNS:
+        match = pattern.match(cleaned)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_target = (groups.get("target") or "").strip().strip(" \"'“”‘’")
+        message = (groups.get("text") or "").strip()
+        message = re.sub(r"^(that|saying)\s+", "", message).strip()
+        if not message:
+            return PhoneAction(
+                reply="Tell me the WhatsApp message also bro.",
+                action={"type": "unsupported_direct_whatsapp", "reason": "empty_message"},
+            )
+        action = {
+            "type": "direct_whatsapp",
+            "label": "WhatsApp",
+            "text": message,
+        }
+        raw_slot = groups.get("slot")
+        if raw_slot:
+            action["whatsapp_slot"] = int(raw_slot)
+            action["label"] = f"WhatsApp {raw_slot}"
+        target_label = "WhatsApp"
+        if raw_slot:
+            target_label = f"WhatsApp {raw_slot}"
+        if raw_target:
+            phone = _phone_digits(raw_target)
+            if phone:
+                action["phone"] = phone
+                target_label = f"{target_label} number {raw_target}"
+            else:
+                action["target_name"] = raw_target
+                target_label = f"{target_label} contact {raw_target}"
+        return PhoneAction(
+            reply=f"Opening {target_label} with your message bro.",
+            action=action,
+        )
+    return None
+
+
 def parse_phone_action(text: str) -> Optional[PhoneAction]:
     normalized = _normalize_command(text)
+    list_whatsapp_action = _parse_list_whatsapp_action(normalized)
+    if list_whatsapp_action is not None:
+        return list_whatsapp_action
+    reply_action = _parse_reply_action(text)
+    if reply_action is not None:
+        return reply_action
+    direct_whatsapp_action = _parse_direct_whatsapp_action(text)
+    if direct_whatsapp_action is not None:
+        return direct_whatsapp_action
     notification_action = _parse_notification_action(normalized)
     if notification_action is not None:
         return notification_action
@@ -112,6 +271,20 @@ def parse_phone_action(text: str) -> Optional[PhoneAction]:
     requested = re.sub(r"\s+", " ", requested)
     if requested.startswith("the "):
         requested = requested[4:]
+    whatsapp_slot = re.fullmatch(r"whatsapp\s*([12])", requested)
+    if whatsapp_slot:
+        slot = int(whatsapp_slot.group(1))
+        return PhoneAction(
+            reply=f"Opening WhatsApp {slot} bro.",
+            action={
+                "type": "open_app",
+                "app": f"whatsapp {slot}",
+                "label": f"WhatsApp {slot}",
+                "packages": [],
+                "intent": "whatsapp_slot",
+                "whatsapp_slot": slot,
+            },
+        )
     app = _APP_ALIASES.get(requested)
     if not app:
         known = ", ".join(sorted({v["label"] for v in _APP_ALIASES.values()}))
